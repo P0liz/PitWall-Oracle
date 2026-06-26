@@ -10,6 +10,8 @@ class SilverLayer:
     data_dir = Path(DATA_DIR) / "silver"
     bronze = BronzeLayer()
     
+    # TODO: specify for every kind of parquet the required data
+    
     def get_clean_laps(self, year: int, race_number: int, session: int):
         assert (session >= 1) & (session <= 5), "Session number not valid: 1 <= session <= 5"
         
@@ -24,11 +26,12 @@ class SilverLayer:
             time_reference = 0
             driver_ref = ""
             to_drop = []
-            deleted_counter = 0
-            deleted_idxs = []
             print("Tot: ", df.shape[0])
             for i in range(0, df.shape[0]):
                 # Default data cleaning
+                if pd.isna(df.iloc[i]["LapTime"]):
+                    to_drop.append(i)
+                    continue
                 if df.iloc[i]["Deleted"] == True:
                     to_drop.append(i)
                     continue
@@ -43,7 +46,8 @@ class SilverLayer:
                     continue
                 
                 # Keep only laps that are within 4% of the driver's last lap time
-                if df.iloc[i]["LapTime"] > time_reference * TIME_THRESHOLD:
+                # Discard any Nan laptimes
+                if (df.iloc[i]["LapTime"] > time_reference * TIME_THRESHOLD):
                     # Check if the times switch from quali to race sim
                     if (i < df.shape[0] - 3):
                         new_ref_first = df.iloc[i]["LapTime"]
@@ -54,21 +58,39 @@ class SilverLayer:
                             time_reference = new_ref_first
                             continue
                     to_drop.append(i)
-                    deleted_counter += 1
-                    deleted_idxs.append(i)
                 else:
                     time_reference = df.iloc[i]["LapTime"]
             
             df = df.drop(to_drop).reset_index(drop=True)
-            print("Deleted number: ",deleted_counter)
-            print("Deleted: ", deleted_idxs)
             df.to_parquet(self.data_dir / filename)
         return df
     
     def get_clean_results(self, year: int, race_number: int, session: int):
         assert (session >= 1) & (session <= 5), "Session number not valid: 1 <= session <= 5"
         
-        return self.bronze.get_raw_laps(year, race_number, session)
+        filename = f"{year}_{race_number}_{session}_clean_results.parquet"
+        if filename in os.listdir(self.data_dir):
+            # Load from file
+            df = pd.read_parquet(self.data_dir / filename)
+        else:
+            # Load raw data
+            df = self.bronze.get_raw_results(year, race_number, session)
+            if df["Position"].empty:
+                # TODO: possibly handle if too much data is corrupted
+                raise ValueError("Position column is empty")
+            
+            if df["Abbreviation"].empty:
+                # TODO: possibly handle if too much data is corrupted
+                raise ValueError("Abbreviation column is empty")
+            
+            if session == 5:    # race
+                # Solve issues with columns Points, Laps, Status
+                # TODO: map position to points to write Points column
+                # TODO: find a way to know how many laps a driver has completed 
+                # That info could also help write the Status column
+                pass
+        
+        return df
     
     def get_event_metadata(self, year: int, race_number: int):
         return self.bronze.get_event_metadata(year, race_number)

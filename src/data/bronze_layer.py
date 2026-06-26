@@ -44,8 +44,7 @@ class BronzeLayer:
             # Load from API
             data = fastf1.get_session(year, race_number, 1)
             data.load()
-            event = data.event
-            df = pd.DataFrame(data=event).reset_index(drop=True)
+            df = pd.DataFrame([data.event]).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
         return df
     

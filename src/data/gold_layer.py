@@ -4,14 +4,17 @@ import pandas as pd
 from pathlib import Path
 from src.config import DATA_DIR, TEAM_ID_MAPPING
 from .silver_layer import SilverLayer
+from .history_builder import HistoryBuilder
 
 class GoldLayer:
+    
+    # TODO: specify for every parquet the required and optional features
     
     def __init__(self):
         # Path where all the parquet files with features are saved
         self.data_dir = Path(DATA_DIR) / "gold"
         # File representing the state: containing data from all the weekends to have history on teams and drivers
-        self.history_path = self.data_dir / "driver_team_history.parquet"
+        self.history_builder = None
         self.silver = None
         self.history_df = None
         self.gold_df = None
@@ -30,7 +33,8 @@ class GoldLayer:
         else:
             # Load data files
             self.silver = SilverLayer()
-            self.history_df = pd.read_parquet(self.history_path)
+            self.history_builder = HistoryBuilder(self.silver)
+            self.history_df = pd.read_parquet(self.history_builder.history_path)
             # Compute from features and save
             self.gold_df = self.get_gp_features(year, race_number)
             self.gold_df.to_parquet(self.data_dir / filename, index=False)
@@ -67,7 +71,7 @@ class GoldLayer:
         # Get from quali_resultd_df
         
         # Rolling Tech DNF Rate
-        # Get from history: need to save Staus from the race results
+        # Get from history: need to save Status from the race results
         
         # TODO: rivedere la feature perchè i team cambiano spesso la PU, quindi è necessario sapere quale
         # viene usata, ed in quale gara, ma è possibile saperlo?
@@ -99,32 +103,9 @@ class GoldLayer:
             self.apply_target_encoding(group_col=col, cutoff_date=race_date)
         
         # Update file containig the state with the new data
-        self.update_history(year, race_number, circuit_location, race_date)
+        self.history_builder.update_history(year, race_number, circuit_location, race_date)
         
         return self.gold_df
-        
-    # TODO: spostare la logica della history in un file a parte altrimenti mi incasino troppo la vita qui
-    def update_history(self, year: int, race_number: str, circuit_location: str, race_date: pd.Timestamp):
-        quali_results = self.silver.get_clean_results(race_number, "4")   
-        race_results = self.silver.get_clean_results(race_number, "5")    
-
-        new_history_rows = build_history_rows(
-            quali_results=quali_results,
-            race_results=race_results,
-            race_id=race_number,
-            race_date=race_date,
-            season=year,
-            circuit_location=circuit_location,
-        )
-
-        if self.history_path.exists():
-            history_df = pd.read_parquet(self.history_path)
-            history_df = history_df.loc[history_df["race_id"] != race_number]  # upsert: rimuovi se già presente
-            updated_history = pd.concat([history_df, new_history_rows], ignore_index=True)
-        else:
-            updated_history = new_history_rows
-
-        updated_history.to_parquet(self.history_path, index=False)
     
     
     # Target Encoding: useful for the model to know the general strength of a driver/team
@@ -169,56 +150,4 @@ class GoldLayer:
         return self.gold_df[group_col].map(encoding_map).fillna(global_fallback)
     
 # Helpers
-def build_driver_id(abbreviation: str, first_name: str, last_name: str) -> str:
-    raw = f"{abbreviation}_{first_name}_{last_name}"
-    return raw.strip().lower().replace(" ", "_")
 
-def map_team_id(team_name: str) -> str:
-    if team_name not in TEAM_ID_MAPPING:
-        warnings.warn(f"TeamName '{team_name}' non presente in TEAM_ID_MAPPING — "
-                       f"fallback al nome grezzo, aggiungilo manualmente al dizionario")
-        return team_name  # fallback visibile, non silenzioso
-    return TEAM_ID_MAPPING[team_name]
-
-def build_history_rows(
-    quali_results: pd.DataFrame,
-    race_results: pd.DataFrame,
-    race_id: str,
-    race_date: pd.Timestamp,
-    season: int,
-    circuit_location: str,
-) -> pd.DataFrame:
-    MECHANICAL_DNF_KEYWORDS = ["Engine", "Gearbox", "Hydraulics", "Electrical",
-                                "Brakes", "Suspension", "Power Unit", "Turbo"]
-
-    def is_mechanical(status: str) -> bool:
-        return any(kw.lower() in str(status).lower() for kw in MECHANICAL_DNF_KEYWORDS)
-
-    rows = []
-    for _, race_row in race_results.iterrows():
-        driver_id = build_driver_id(
-            race_row["Abbreviation"], race_row["FirstName"], race_row["LastName"]
-        )
-
-        quali_row = quali_results.loc[quali_results["Abbreviation"] == race_row["Abbreviation"]]
-        grid_position = quali_row["GridPosition"].iloc[0] if not quali_row.empty else race_row.get("GridPosition", np.nan)
-
-        classified_pos = race_row["ClassifiedPosition"]
-        is_podium = classified_pos in ("1", "2", "3")
-
-        rows.append({
-            "race_id": race_id,
-            "race_date": race_date,
-            "season": season,
-            "driver_id": driver_id,
-            "team_id": map_team_id(race_row["TeamName"]),
-            "circuit_id": circuit_location,
-            "grid_position": grid_position,
-            "points_scored": race_row["Points"],
-            "laps_completed": race_row["Laps"],
-            "status_raw": race_row["Status"],
-            "is_mechanical_dnf": is_mechanical(race_row["Status"]),
-            "is_podium": is_podium,
-        })
-
-    return pd.DataFrame(rows)
