@@ -2,11 +2,18 @@ import fastf1
 import pandas as pd
 import os
 from pathlib import Path
-from src.config import DATA_DIR
+import requests
+from src.config import DATA_DIR, FORECAST_URL, ARCHIVE_URL
+
 
 class BronzeLayer:
     data_dir = Path(DATA_DIR) / "bronze"
-    
+
+    def __init__(self):
+        # Create data directory if it doesn't exist
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+
     def get_raw_laps(self, year: int, race_number: int, session: int):
         filename = f"{year}_{race_number}_{session}_raw_laps.parquet"
         if filename in os.listdir(self.data_dir):
@@ -20,7 +27,7 @@ class BronzeLayer:
             df = pd.DataFrame(data=laps).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
         return df
-    
+
     def get_raw_results(self, year: int, race_number: int, session: int):
         filename = f"{year}_{race_number}_{session}_raw_results.parquet"
         if filename in os.listdir(self.data_dir):
@@ -34,7 +41,7 @@ class BronzeLayer:
             df = pd.DataFrame(data=results).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
         return df
-    
+
     def get_event_metadata(self, year: int, race_number: int):
         filename = f"{year}_{race_number}_event.parquet"
         if filename in os.listdir(self.data_dir):
@@ -47,9 +54,10 @@ class BronzeLayer:
             df = pd.DataFrame([data.event]).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
         return df
-    
-    def get_raw_weather(self, year: int, race_number: int, session: int):
-        filename = f"{year}_{race_number}_{session}_raw_weather.parquet"
+
+    # TODO: could use for historical track weather, but does not do predictions
+    def get_raw_weather_old(self, year: int, race_number: int, session: int):
+        filename = f"{year}_{race_number}_{session}_raw_weather_fastf1.parquet"
         if filename in os.listdir(self.data_dir):
             # Load from file
             df = pd.read_parquet(self.data_dir / filename)
@@ -61,7 +69,49 @@ class BronzeLayer:
             df = pd.DataFrame(data=event).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
         return df
-        
-    
-    
 
+    def get_raw_weather(
+        self,
+        year: int,
+        race_number: int,
+        session: int,
+        latitude: float,
+        longitude: float,
+        race_datetime_utc: pd.Timestamp,
+        future: bool = False,
+    ):
+        """
+        future=False -> Archive API, precipitation in mm (historical training set).
+        future=True  -> Forecast API, precipitation_probability in % (future races).
+        Saves raw hourly data as parquet, same pattern as FastF1 raw data.
+        """
+        filename = f"{year}_{race_number}_{session}_raw_weather.parquet"
+        if filename in os.listdir(self.data_dir):
+            return pd.read_parquet(self.data_dir / filename)
+
+        race_date = race_datetime_utc.date().isoformat()
+        url, field = (FORECAST_URL, "precipitation_probability") if future else (ARCHIVE_URL, "precipitation")
+
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "start_date": race_date,
+            "end_date": race_date,
+            "hourly": field,
+            "timezone": "UTC",
+        }
+
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+
+        df = pd.DataFrame(
+            {
+                "time": pd.to_datetime(payload["hourly"]["time"]),
+                "value": payload["hourly"][field],
+                "field": field,
+                "future": future,
+            }
+        )
+        df.to_parquet(self.data_dir / filename, index=False)
+        return df

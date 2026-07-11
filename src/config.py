@@ -1,14 +1,17 @@
 DATA_DIR = "data_files"
 
 TEAM_ID_MAPPING = {
-    "Alfa Romeo": "sauber_lineage",
-    "Kick Sauber": "sauber_lineage",
+    "Alfa Romeo": "audi_lineage",
+    "Kick Sauber": "audi_lineage",
     "Racing Point": "aston_martin_lineage",
     "Aston Martin": "aston_martin_lineage",
     "Renault": "alpine_lineage",
     "Alpine": "alpine_lineage",
     "Red Bull": "red_bull_lineage",
-    "AlphaTauri": "alphatauri_lineage",
+    "Red Bull Racing": "red_bull_lineage",
+    "Racing Bulls": "vcarb_lineage",
+    "RB": "vcarb_lineage",
+    "AlphaTauri": "vcarb_lineage",
     "Scuderia Ferrari": "ferrari_lineage",
     "Ferrari": "ferrari_lineage",
     "Mercedes": "mercedes_lineage",
@@ -16,7 +19,56 @@ TEAM_ID_MAPPING = {
     "Williams": "williams_lineage",
     "Haas F1 Team": "haas_lineage",
     "Audi": "audi_lineage",
-    "": "unknown"
+    "Cadillac": "cadillac_lineage",
+    "": "unknown",
 }
 
-MECHANICAL_DNF_KEYWORDS = ["Engine", "Gearbox", "Hydraulics", "Electrical", "Brakes", "Suspension", "Power Unit", "Turbo"]
+# "Location": (longitude, latitude)
+CIRCUIT_COORDS = {
+    "Austin": (-97.633, 30.135),
+    "Baku": (49.842, 40.369),
+    "Barcelona": (2.259, 41.569),
+    "Buenos Aires": (-58.459, -34.694),
+    "Budapest": (19.250, 47.583),
+    "Dix": (-76.927, 42.337),
+    "Estoril": (-9.394, 38.751),
+    "Hockenheim": (8.572, 49.330),
+    "Imola": (11.713, 44.341),
+    "Indianapolis": (-86.236, 39.795),
+    "Istanbul": (29.412, 40.958),
+    "Jacarepaguá": (-43.395, -22.976),
+    "Jeddah": (39.104, 21.632),
+    "Johannesburg": (28.069, -25.998),
+    "Las Vegas": (-115.168, 36.116),
+    "Le Castellet": (5.791, 43.253),
+    "Lusail": (51.454, 25.490),
+    "Madrid": (-3.620, 40.471),
+    "Magny-Cours": (3.164, 46.863),
+    "Melbourne": (144.970, -37.846),
+    "Mexico City": (-99.091, 19.402),
+    "Miami": (-80.239, 25.958),
+    "Monaco": (7.429, 43.737),
+    "Montreal": (-73.525, 45.506),
+    "Monza": (9.290, 45.621),
+    "Nürburg": (6.943, 50.334),
+    "Portimão": (-8.628, 37.232),
+    "Sakhir": (50.512, 26.031),
+    "Sao Paulo": (-46.698, -23.702),
+    "Scarperia e San Piero": (11.372, 43.998),
+    "Sepang": (101.738, 2.761),
+    "Shanghai": (121.221, 31.340),
+    "Silverstone": (-1.017, 52.072),
+    "Singapore": (103.859, 1.291),
+    "Sochi": (39.960, 43.407),
+    "Spa-Francorchamps": (5.971, 50.436),
+    "Spielberg": (14.761, 47.223),
+    "Suzuka": (136.534, 34.844),
+    "Yas Marina": (54.601, 24.471),
+    "Zandvoort": (4.541, 52.389),
+}
+
+
+# Open-meteo API
+FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+PREVIOUS_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
