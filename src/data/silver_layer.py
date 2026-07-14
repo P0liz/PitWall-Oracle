@@ -5,18 +5,20 @@ from pathlib import Path
 from src.config import DATA_DIR
 from .bronze_layer import BronzeLayer
 from .history_builder import build_driver_id, map_team_id
+from src.utils import setup_custom_logger
 
 TIME_THRESHOLD = 1.04
 
 
 class SilverLayer:
-    data_dir = Path(DATA_DIR) / "silver"
 
     def __init__(self):
+        self.data_dir = Path(DATA_DIR) / "silver"
         # Create data directory if it doesn't exist
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
         self.bronze = BronzeLayer()
+        self.log = setup_custom_logger("DataLoader")
 
     def get_clean_laps(self, year: int, race_number: int, session: int, force: bool):
         """
@@ -37,6 +39,7 @@ class SilverLayer:
             # Load raw data
             df = self.bronze.get_raw_laps(year, race_number, session)
             if df["LapTime"].empty:
+                self.log.error("LapTime column is empty")
                 raise ValueError("LapTime column is empty")
 
             time_reference = 0
@@ -101,23 +104,49 @@ class SilverLayer:
             df = self.bronze.get_raw_results(year, race_number, session)
             if df["Position"].empty:
                 # TODO: possibly handle if too much data is corrupted
+                self.log.error("Position column is empty")
                 raise ValueError("Position column is empty")
 
             if df["Abbreviation"].empty:
                 # TODO: possibly handle if too much data is corrupted
+                self.log.error("Abbreviation column is empty")
                 raise ValueError("Abbreviation column is empty")
 
             # TODO: handle if necessary
-            if session == 5:  # race
+            # corrections for 2023 or before not supported (hard to distinguish sprint weekend from normal)
+            if (session == 5 or session == 3) and year >= 2024:  # race or sprint race
                 if df["Points"].empty or df["Laps"].empty or df["Status"].empty:
+                    self.log.error("Points, Laps or Status column is empty")
                     raise ValueError("Points, Laps or Status column is empty")
-                # Solve issues with columns Points, Laps, Status
-                # TODO: map position to points to write Points column
-                # TODO: find a way to know how many laps a driver has completed
-                # That info could also help write the Status column
+                    # Solve issues with columns Points, Laps, Status
+                    # TODO: map position to points to write Points column
+                    # TODO: find a way to know how many laps a driver has completed
+                    # That info could also help write the Status column
+
+                # Solve issues with NaN values in Laps column
+                if df["Laps"].isnull().any().any():
+                    self.log.warning(f"NaN values found in Laps column, correcting - {year}_{race_number}_{session}")
+                    max_laps = df["Laps"].max()
+                    null_idx = df[df["Laps"].isnull()].index
+                    for idx in null_idx:
+                        position = df.at[idx, "Position"]
+                        status = df.at[idx, "Status"]
+                        if pd.isna(position):
+                            df.at[idx, "Laps"] = 0
+                        elif pd.isna(status):
+                            df.at[idx, "Laps"] = 0
+                        elif status == "Finished":
+                            df.at[idx, "Laps"] = max_laps
+                        elif status == "Lapped":
+                            df.at[idx, "Laps"] = max_laps - 1
+                        elif status == "Withdrew":
+                            df.at[idx, "Laps"] = 0
+                        else:
+                            df.at[idx, "Laps"] = max_laps // 2
 
             # Custom correction cause data sucks
             if (df.loc[df["Abbreviation"] == "ANT", "FirstName"] == "Andrea Kimi").any():
+                self.log.warning(f"Found Andrea Kimi in ANT row, changing to Kimi - {year}_{race_number}_{session}")
                 df.loc[df["Abbreviation"] == "ANT", "FirstName"] = "Kimi"
 
             # Add driver_id and team_id columns
@@ -128,10 +157,23 @@ class SilverLayer:
             df.to_parquet(self.data_dir / filename)
         return df
 
-    def get_event_metadata(self, year: int, race_number: int):
-        df = self.bronze.get_event_metadata(year, race_number)
-        if df.empty:
-            raise ValueError("Event metadata is empty")
+    def get_clean_event_metadata(self, year: int, race_number: int, force: bool):
+        filename = f"{year}_{race_number}_clean_event.parquet"
+        if filename in os.listdir(self.data_dir) and not force:
+            # Load from file
+            df = pd.read_parquet(self.data_dir / filename)
+        else:
+            df = self.bronze.get_event_metadata(year, race_number)
+            if df.empty:
+                self.log.error("Event metadata is empty")
+                raise ValueError("Event metadata is empty")
+            # Custom correction cause data sucks
+            if (df["Location"] == "Miami Gardens").any():
+                self.log.warning(f"Found Miami Gardens in Location, changing to Miami - {year}_{race_number}")
+                df.loc[df["Location"] == "Miami Gardens", "Location"] = "Miami"
+            if (df["Location"] == "Monte Carlo").any():
+                self.log.warning(f"Found Monte Carlo in Location, changing to Monaco - {year}_{race_number}")
+                df.loc[df["Location"] == "Monte Carlo", "Location"] = "Monaco"
         return df
 
     def get_clean_weather(

@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from src.config import DATA_DIR, CIRCUIT_COORDS
+from src.utils import setup_custom_logger
 from .silver_layer import SilverLayer
 from .history_builder import HistoryBuilder
 from sklearn.linear_model import HuberRegressor
@@ -30,10 +31,10 @@ class GoldLayer:
         self.data_dir = Path(DATA_DIR) / "gold"
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
+        self.log = setup_custom_logger("DataLoader")
         # File representing the state: containing data from all the weekends to have history on teams and drivers
         self.history_builder = None
-        self.silver = None
-        self.history_df = None
+        self.silver = SilverLayer()
 
     # Get features to parquet: one parquet for each weekend, with one row for each driver
     # The rows are the groups used by XGBRanker to calculate the ranking
@@ -44,11 +45,13 @@ class GoldLayer:
         assert year >= 2022, "Year not supported: must be >= 2022"
         assert (race_number <= 24) & (race_number >= 1), "Race number {id} does not exist: max 24 races"
         self.silver = SilverLayer()
-        event = self.silver.get_event_metadata(year, race_number)
+        event = self.silver.get_clean_event_metadata(year, race_number, force)
         results = []
+        self.log.info(f"Building features for {year} Grand Prix #{race_number}...")
 
-        if event["EventFormat"].iloc[0] == "sprint_qualifying":  # Sprint race
-            results.append(self.get_features(event, year, race_number, session=3, force=force))
+        if event["EventFormat"].iloc[0] != "conventional":  # Sprint race
+            sprint_race_session = 3 if year >= 2024 else 4
+            results.append(self.get_features(event, year, race_number, session=sprint_race_session, force=force))
         results.append(self.get_features(event, year, race_number, session=5, force=force))
 
         return results
@@ -73,17 +76,33 @@ class GoldLayer:
         silver = self.silver
         gold_df = pd.DataFrame()
 
-        if event["EventFormat"].iloc[0] == "sprint_qualifying" and session == 3:  # Sprint race
-            practice_laps_df = silver.get_clean_laps(year, race_number, session - 2, force)  # FP1
+        if event["EventFormat"].iloc[0] != "conventional" and session == 3:  # Sprint race 2024+
+            practice_laps_df = silver.get_clean_laps(year, race_number, 1, force)  # FP1
             race_date = event["Session3Date"].iloc[0]
-        else:
+            quali_results_df = silver.get_clean_results(year, race_number, 2, force)
+            race_results_df = silver.get_clean_results(year, race_number, 3, force)
+        elif event["EventFormat"].iloc[0] != "conventional" and session == 4:  # Sprint race 2023 or before
+            practice_laps_df = silver.get_clean_laps(year, race_number, 1, force)  # FP1
+            race_date = event["Session4Date"].iloc[0]
+            quali_results_df = silver.get_clean_results(year, race_number, 3, force)
+            race_results_df = silver.get_clean_results(year, race_number, 4, force)
+        elif event["EventFormat"].iloc[0] != "conventional" and session == 5:
+            if year <= 2023:  # main race 2023 or before
+                practice_laps_df = silver.get_clean_laps(year, race_number, 4, force)  # Sprint for data
+                quali_results_df = silver.get_clean_results(year, race_number, 2, force)
+            else:  # main race 2024+
+                practice_laps_df = silver.get_clean_laps(year, race_number, 3, force)  # Sprint for data
+                quali_results_df = silver.get_clean_results(year, race_number, 4, force)
+            race_date = event["Session5Date"].iloc[0]
+            race_results_df = silver.get_clean_results(year, race_number, 5, force)
+        else:  # normal weekend
             fp1 = silver.get_clean_laps(year, race_number, 1, force)
             fp2 = silver.get_clean_laps(year, race_number, 2, force)
             fp3 = silver.get_clean_laps(year, race_number, 3, force)
             practice_laps_df = pd.concat([fp1, fp2, fp3], ignore_index=True)  # All FP sessions
             race_date = event["Session5Date"].iloc[0]
-        quali_results_df = silver.get_clean_results(year, race_number, session - 1, force)
-        race_results_df = silver.get_clean_results(year, race_number, session, force)
+            quali_results_df = silver.get_clean_results(year, race_number, session - 1, force)
+            race_results_df = silver.get_clean_results(year, race_number, session, force)
 
         # Normalize to tz-naive UTC scalar
         if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
@@ -96,7 +115,9 @@ class GoldLayer:
         history_before = self.history_builder.get_history_up_to(race_date)
 
         # Update file containig the state with the new data
-        self.history_builder.update_history(year, race_number, session, circuit_location, race_date, force)
+        self.history_builder.update_history(
+            year, race_number, quali_results_df, race_results_df, circuit_location, race_date
+        )
 
         # Get longest stint for each driver in practice laps
         race_sim_best_stint_df = self.find_race_sim_stint(practice_laps_df, race_results_df["Abbreviation"].unique())
@@ -146,8 +167,8 @@ class GoldLayer:
             status = race_results_df.loc[race_results_df["driver_id"] == driver_id, "Status"].iloc[0]
 
             # Target
-            if self._is_unclassified_dnf(status):
-                row["target"] = None  # esclusa dal training, non "ultimo posto"
+            if self._is_unclassified_dnf(status) or position is np.nan:
+                row["target"] = np.nan  # esclusa dal training, non "ultimo posto"
             else:
                 n_drivers = race_results_df["driver_id"].nunique()
                 row["target"] = n_drivers - position + 1
@@ -155,17 +176,20 @@ class GoldLayer:
             gold_rows.append(row)
 
         gold_df = pd.DataFrame(gold_rows)
-        self._compute_teammate_features(gold_df, race_results_df, quali_results_df)
+        self._compute_teammate_features(gold_df, quali_results_df)
 
         return gold_df
 
-    def _compute_teammate_features(
-        self, gold_df: pd.DataFrame, race_results_df: pd.DataFrame, quali_results_df: pd.DataFrame
-    ):
+    def _compute_teammate_features(self, gold_df: pd.DataFrame, quali_results_df: pd.DataFrame):
         """Compute teammate-based features using the current gold_df."""
         # Group by team_id
         for team_id in gold_df["team_id"].unique():
             team_drivers = gold_df[gold_df["team_id"] == team_id]
+            if len(team_drivers) != 2:
+                self.log.warning(
+                    f"Team {team_id} does not have exactly 2 drivers, skipping teammate features computation"
+                )
+                continue
             driver_a = team_drivers.iloc[0]["driver_id"]  # First driver
             driver_b = team_drivers.iloc[1]["driver_id"]  # Second driver
 
@@ -291,8 +315,8 @@ class GoldLayer:
 
     def _get_grid_position(self, race_results_df: pd.DataFrame, driver_id: str) -> float:
         grid_position = race_results_df.loc[race_results_df["driver_id"] == driver_id, "GridPosition"].iloc[0]
-        if grid_position == 0:
-            warnings.warn(f"Driver {driver_id} has grid position 0")
+        if grid_position <= 0 or np.isnan(grid_position):
+            self.log.warning(f"Driver {driver_id} has grid position {grid_position}")
         return float(grid_position)
 
     def _compute_teammate_delta_q(
@@ -336,7 +360,7 @@ class GoldLayer:
         if team_history.empty:
             return np.nan
 
-        is_retired = team_history["status_raw"] == "Retired"
+        is_retired = (team_history["status_raw"] == "Retired") | (team_history["status_raw"] == "Accident")
         is_first_lap_crash = is_retired & (team_history["laps_completed"] <= 1)
         is_dnf = is_retired & ~is_first_lap_crash
 
@@ -380,22 +404,18 @@ class GoldLayer:
         return float(cumulative_laps)
 
     def _compute_track_affinity(self, history_before: pd.DataFrame, driver_id: str, circuit_id: str) -> float:
-        """Driver's average finishing position at this circuit in past seasons."""
+        """Driver's average position at this circuit in past seasons."""
         driver_history = history_before[history_before["driver_id"] == driver_id]
         if driver_history.empty:
             return np.nan  # rookie o nessuno storico ancora disponibile
 
-        career_points = driver_history["points_scored"].sum()
-        circuit_points = driver_history.loc[driver_history["circuit_id"] == circuit_id, "points_scored"].sum()
+        career_avg = driver_history["race_position"].mean()
+        circuit_avg = driver_history.loc[driver_history["circuit_id"] == circuit_id, "race_position"].mean()
 
-        if career_points == 0:
-            # il pilota ha corso ma non ha mai preso punti: 0/0 è indefinito,
-            # ma "zero punti ovunque" implica zero affinità anche qui
-            circuit_ratio = 0.0
-        else:
-            circuit_ratio = circuit_points / career_points
+        if np.isnan(career_avg) or np.isnan(circuit_avg) or career_avg <= 0:
+            return np.nan
 
-        return float(circuit_ratio)
+        return float(circuit_avg / career_avg)
 
     def _compute_current_form(self, history_before: pd.DataFrame, driver_id: str):
         driver_history = history_before[history_before["driver_id"] == driver_id]
@@ -412,19 +432,21 @@ class GoldLayer:
     def _is_unclassified_dnf(self, status: str) -> bool:
         """True if the driver did not finish and should be excluded from the target."""
         # Not including Disqualified because usually it happens after the race
-        if status == "Retired" or status == "Accident":
+        if status is None:
+            return False  # fallback > no signal
+        if status == "Retired" or status == "Accident" or status == "Withdrew":
             return True
         else:
             return False
 
-    def _get_regs_era(self, year: int) -> int | None:
+    def _get_regs_era(self, year: int):
         """Return the regulation era based on the year."""
         if year >= 2026:
             return 2026
         elif year >= 2022:
             return 2022
         else:
-            return None  # Should not happen due to assertion in build_features
+            return np.nan  # Should not happen due to assertion in build_features
 
 
 @staticmethod
