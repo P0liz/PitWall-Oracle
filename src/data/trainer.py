@@ -41,54 +41,9 @@ class Training:
             enable_categorical=True,
         )
 
-    def train(self):
-        if self.train_df is None:
-            raise ValueError("Dati non trovati. Esegui prepare_data() prima di train().")
-
-        self.train_df = self.train_df.sort_values("race_date").reset_index(drop=True)
-        self.train_df["qid"] = pd.factorize(self.train_df["race_date"])[0]
-        self.test_df = self.test_df.sort_values("race_date").reset_index(drop=True)
-        self.test_df["qid"] = pd.factorize(self.test_df["race_date"])[0]
-
-        X_train = self.train_df.drop(TO_DROP + ["qid"], axis=1)
-        X_test = self.test_df.drop(TO_DROP + ["qid"], axis=1)
-        y_train, y_test = self.train_df["target"], self.test_df["target"]
-        qid_train, qid_val = self.train_df["qid"], self.test_df["qid"]
-
-        # ATTENZIONE: per rank:ndcg, sample_weight vuole UN PESO PER GRUPPO (per gara),
-        # non uno per riga. Un peso per-riga fa fallire xgboost con un errore poco
-        # leggibile ("group_weights.size() == group_ptr.size() - 1"). Dato che il tuo
-        # peso dipende solo da race_date (uguale per tutti i piloti della stessa gara),
-        # è comunque costante nel gruppo: basta un valore per gara.
-        self.ranker.fit(
-            X_train,
-            y_train,
-            qid=qid_train,
-            sample_weight=make_weights(self.train_df.groupby("qid")["race_date"].first()),
-            eval_set=[(X_test, y_test)],
-            eval_qid=[qid_val],
-            verbose=False,
-        )
-
-        print("Miglior iterazione:", self.ranker.best_iteration)
-        print("Best NDCG@20 su val:", self.ranker.best_score)
-        importances = pd.Series(self.ranker.feature_importances_, index=X_train.columns)
-        print(importances.sort_values(ascending=False).head(10))
-        return self.ranker
-
-    def get_train_data(self, force: bool = False):
-        if not force:
-            self.test_df = pd.read_parquet(f"{self.data_dir}/test_df.parquet")
-            X_test = self.test_df.drop(TO_DROP, axis=1)
-            y_test = self.test_df["target"]
-            test_group_sizes = self.test_df.groupby("race_date", sort=False).size().to_numpy()
-        else:
-            raise NotImplementedError
-        return X_test, y_test, test_group_sizes
-
     def save_artifacts(self, filename: str = "pitwall_oracle_v1.json"):
         """Salva il modello addestrato nel formato nativo di XGBoost."""
-        if not hasattr(self.ranker, "best_iteration"):
+        if not hasattr(self.ranker, "feature_importances_"):
             raise ValueError("Il modello non è ancora stato addestrato. Impossibile salvare.")
         filepath = os.path.join(self.model_dir, filename)
 
@@ -115,6 +70,18 @@ class StaticTraining(Training):
         super().__init__(data_loader)
         self.train_df = None
         self.test_df = None
+        self.log = setup_custom_logger("StaticTraining")
+        self.ranker = XGBRanker(
+            objective="rank:ndcg",
+            tree_method="hist",
+            n_estimators=200,
+            learning_rate=0.05,
+            max_depth=4,
+            eval_metric="ndcg@20",
+            missing=np.nan,
+            early_stopping_rounds=20,
+            enable_categorical=True,
+        )
 
     async def prepare_data(self, force: bool = False):
         """Metodo esplicito: i dati vengono caricati solo quando chiami questo metodo."""
@@ -127,6 +94,42 @@ class StaticTraining(Training):
         )
         print("Dati pronti nel Paddock.")
 
+    def train(self):
+        if self.train_df is None:
+            raise ValueError("Dati non trovati. Esegui prepare_data() prima di train().")
+
+        self.train_df = self.train_df.sort_values("race_date").reset_index(drop=True)
+        self.train_df["qid"] = pd.factorize(self.train_df["race_date"])[0]
+        self.test_df = self.test_df.sort_values("race_date").reset_index(drop=True)
+        self.test_df["qid"] = pd.factorize(self.test_df["race_date"])[0]
+
+        X_train = self.train_df.drop(TO_DROP + ["qid"], axis=1)
+        X_test = self.test_df.drop(TO_DROP + ["qid"], axis=1)
+        y_train, y_test = self.train_df["target"], self.test_df["target"]
+        qid_train, qid_test = self.train_df["qid"], self.test_df["qid"]
+
+        # ATTENZIONE: per rank:ndcg, sample_weight vuole UN PESO PER GRUPPO (per gara),
+        # non uno per riga. Un peso per-riga fa fallire xgboost con un errore poco
+        # leggibile ("group_weights.size() == group_ptr.size() - 1"). Dato che il tuo
+        # peso dipende solo da race_date (uguale per tutti i piloti della stessa gara),
+        # è comunque costante nel gruppo: basta un valore per gara.
+        self.ranker.fit(
+            X_train,
+            y_train,
+            qid=qid_train,
+            sample_weight=make_weights(self.train_df.groupby("qid")["race_date"].first()),
+            eval_set=[(X_test, y_test)],
+            eval_qid=[qid_test],
+            verbose=False,
+        )
+
+        if self.ranker.early_stopping_rounds is not None:
+            print("Miglior iterazione:", self.ranker.best_iteration)
+            print("Best NDCG@20 su val:", self.ranker.best_score)
+        importances = pd.Series(self.ranker.feature_importances_, index=X_train.columns)
+        print(importances.sort_values(ascending=False).head(10))
+        return self.ranker
+
 
 class DynamicTraining(Training):
     def __init__(self, data_loader: DataLoader):
@@ -134,6 +137,17 @@ class DynamicTraining(Training):
         self.train_df = None
         self.test_df = None
         self.log = setup_custom_logger("DynamicTraining")
+        self.ranker = XGBRanker(
+            objective="rank:ndcg",
+            tree_method="hist",
+            n_estimators=200,
+            learning_rate=0.05,
+            max_depth=4,
+            eval_metric="ndcg@22",
+            missing=np.nan,
+            early_stopping_rounds=20,
+            enable_categorical=True,
+        )
 
     async def prepare_data(self, last_date, force: bool = False):
         """Metodo esplicito: i dati vengono caricati solo quando chiami questo metodo."""
@@ -143,6 +157,34 @@ class DynamicTraining(Training):
             self.test_df["circuit_id"], categories=self.train_df["circuit_id"].cat.categories
         )
         print("Dati pronti nel Paddock.")
+
+    def train(self):
+        if self.train_df is None:
+            raise ValueError("Dati non trovati. Esegui prepare_data() prima di train().")
+
+        # Ordiniamo temporalmente
+        self.train_df = self.train_df.sort_values("race_date").reset_index(drop=True)
+        self.train_df["qid"] = pd.factorize(self.train_df["race_date"])[0]
+
+        # 100% dei dati disponibili va nel train set!
+        X_train = self.train_df.drop(TO_DROP + ["qid"], axis=1)
+        y_train = self.train_df["target"]
+        qid_train = self.train_df["qid"]
+
+        # Fit pulito senza eval_set. È deterministico e ultra-veloce.
+        self.ranker.fit(
+            X_train,
+            y_train,
+            qid=qid_train,
+            sample_weight=make_weights(self.train_df.groupby("qid")["race_date"].first()),
+            verbose=False,
+        )
+
+        # Monitoriamo l'importanza delle feature per verificare che il modello
+        # stia effettivamente dando peso ai trend del 2026 (es. Track Affinity o qualifiche)
+        importances = pd.Series(self.ranker.feature_importances_, index=X_train.columns)
+        self.log.debug(f"Top 3 Feature Importances:\n{importances.sort_values(ascending=False).head(3)}")
+        return self.ranker
 
 
 class PrequentialTracker:

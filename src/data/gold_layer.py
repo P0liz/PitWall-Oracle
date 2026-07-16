@@ -22,6 +22,20 @@ Possibili features da inserire in futuro (in caso manchino dati)
 3. Historical weather: andando a prendere negli ultimi, bho 10 anni, tramite i dati di fast f1, se la gara è stata bagnata; 
     costruire una history a parte che comprenda tutti i circuiti facendo gare_bagnate/tot_gare
 """
+# TODO: aggiungere o modificare features che lavorino sulla storia molto recente (ultme 3 gare)
+# bisogna fare in modo che il modello impari ad adattarsi in fretta ai cambiamenti
+# current quali form?
+# quali pace (best laptime)
+# per entrambe le current form si può avere più colonne: 3,5,10 last races
+# current form però del team
+# cambiare decay_rate dei pesi? (più aggressivo?)
+# un pò di dati sul circuito:
+#  - is street circuit? (mapping a mano ma si fa)
+#  - overtaking difficulty (non so come implementarlo)
+#  - anche altre: elevation height o safety car rate, ma possono creare problemi troppe features sul circuito?
+# alla fine sono uguali per tutti i piloti quindi bho
+
+# TODO: verificare attendibilità dell'ottimizzazione
 
 
 class GoldLayer:
@@ -32,9 +46,8 @@ class GoldLayer:
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
         self.log = setup_custom_logger("DataLoader")
-        # File representing the state: containing data from all the weekends to have history on teams and drivers
-        self.history_builder = None
         self.silver = SilverLayer()
+        self.history_builder = HistoryBuilder(self.silver)
 
     # Get features to parquet: one parquet for each weekend, with one row for each driver
     # The rows are the groups used by XGBRanker to calculate the ranking
@@ -44,7 +57,6 @@ class GoldLayer:
         """
         assert year >= 2022, "Year not supported: must be >= 2022"
         assert (race_number <= 24) & (race_number >= 1), "Race number {id} does not exist: max 24 races"
-        self.silver = SilverLayer()
         event = self.silver.get_clean_event_metadata(year, race_number, force)
         results = []
         self.log.info(f"Building features for {year} Grand Prix #{race_number}...")
@@ -62,9 +74,6 @@ class GoldLayer:
             # Load from file
             gold_df = pd.read_parquet(self.data_dir / filename)
         else:
-            # Load data files
-            self.history_builder = HistoryBuilder(self.silver)
-            # self.history_df = pd.read_parquet(self.history_builder.history_path)
             # Compute from features and save
             gold_df = self.get_gp_features(event, year, race_number, session, force)
             gold_df.to_parquet(self.data_dir / filename, index=False)
@@ -148,6 +157,7 @@ class GoldLayer:
                 # Categoria A: solo dati del weekend corrente, nessuna history necessaria
                 "degradation_rate": self._compute_degradation_rate(race_sim_best_stint_df, abbreviation),
                 "simulated_race_pace": self._compute_race_pace_delta(race_sim_best_stint_df, abbreviation),
+                "pace_imputed": False,  # updated in _compute_teammate_features
                 "teammate_delta_pace": np.nan,  # computed at the end
                 "grid_position": grid_position,
                 "teammate_delta_q": np.nan,  # computed at the end
@@ -167,7 +177,7 @@ class GoldLayer:
             status = race_results_df.loc[race_results_df["driver_id"] == driver_id, "Status"].iloc[0]
 
             # Target
-            if self._is_unclassified_dnf(status) or position is np.nan:
+            if self._is_unclassified_dnf(status) or pd.isna(position):
                 row["target"] = np.nan  # esclusa dal training, non "ultimo posto"
             else:
                 n_drivers = race_results_df["driver_id"].nunique()
@@ -300,10 +310,12 @@ class GoldLayer:
         # asymmetry for teammate delta: the one missing gets nan, the other gets 0
         elif a_nan:
             gold_df.loc[gold_df["driver_id"] == driver_a, "simulated_race_pace"] = driver_b_race_pace
+            gold_df.loc[gold_df["driver_id"] == driver_a, "pace_imputed"] = True
             gold_df.loc[gold_df["driver_id"] == driver_a, "teammate_delta_pace"] = np.nan
             gold_df.loc[gold_df["driver_id"] == driver_b, "teammate_delta_pace"] = 0.0
         elif b_nan:
             gold_df.loc[gold_df["driver_id"] == driver_b, "simulated_race_pace"] = driver_a_race_pace
+            gold_df.loc[gold_df["driver_id"] == driver_b, "pace_imputed"] = True
             gold_df.loc[gold_df["driver_id"] == driver_a, "teammate_delta_pace"] = 0.0
             gold_df.loc[gold_df["driver_id"] == driver_b, "teammate_delta_pace"] = np.nan
             print("Missing race pace for driver_b, copied from driver_a")
@@ -317,7 +329,10 @@ class GoldLayer:
         grid_position = race_results_df.loc[race_results_df["driver_id"] == driver_id, "GridPosition"].iloc[0]
         if grid_position <= 0 or np.isnan(grid_position):
             self.log.warning(f"Driver {driver_id} has grid position {grid_position}")
-        return float(grid_position)
+            # starting from pitlane probably
+            grid_position = float(race_results_df["GridPosition"].max() + 2) if not np.isnan(grid_position) else np.nan
+
+        return grid_position
 
     def _compute_teammate_delta_q(
         self,
@@ -351,7 +366,11 @@ class GoldLayer:
         q1 = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Q1"].dt.total_seconds()
         q2 = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Q2"].dt.total_seconds()
         q3 = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Q3"].dt.total_seconds()
-        return np.nanmax([q1, q2, q3])
+
+        times = [q1, q2, q3]
+        if all(np.isnan(t).all() for t in times):
+            self.log.warning(f"Driver {driver_id} has no quali times in Q1/Q2/Q3")
+        return np.nanmax(times)
 
     def _compute_rolling_dnf_rate(
         self, history_before: pd.DataFrame, team_id: str, window: int = ROLLING_DNF_WINDOW
@@ -360,9 +379,10 @@ class GoldLayer:
         if team_history.empty:
             return np.nan
 
-        is_retired = (team_history["status_raw"] == "Retired") | (team_history["status_raw"] == "Accident")
+        is_dns = team_history["status_raw"] == "Did not start"
+        is_retired = team_history["status_raw"] == "Retired"
         is_first_lap_crash = is_retired & (team_history["laps_completed"] <= 1)
-        is_dnf = is_retired & ~is_first_lap_crash
+        is_dnf = is_dns | (is_retired & ~is_first_lap_crash)
 
         return float(is_dnf.mean())
 
@@ -412,7 +432,7 @@ class GoldLayer:
         career_avg = driver_history["race_position"].mean()
         circuit_avg = driver_history.loc[driver_history["circuit_id"] == circuit_id, "race_position"].mean()
 
-        if np.isnan(career_avg) or np.isnan(circuit_avg) or career_avg <= 0:
+        if np.isnan(career_avg) or np.isnan(circuit_avg):
             return np.nan
 
         return float(circuit_avg / career_avg)
@@ -434,7 +454,7 @@ class GoldLayer:
         # Not including Disqualified because usually it happens after the race
         if status is None:
             return False  # fallback > no signal
-        if status == "Retired" or status == "Accident" or status == "Withdrew":
+        if status == "Retired" or status == "Accident" or status == "Withdrew" or status == "Did not start":
             return True
         else:
             return False
@@ -482,4 +502,4 @@ def _is_reset_event(grid_position: float, quali_position: float, penalty_thresho
         return False  # can't compute a delta — defensive fallback
 
     delta = grid_position - quali_position
-    return delta >= penalty_threshold
+    return delta > penalty_threshold

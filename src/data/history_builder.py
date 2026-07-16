@@ -68,6 +68,22 @@ class HistoryBuilder:
 
         updated_history.to_parquet(self.history_path, index=False)
 
+    def _is_unclassified_dnf(self, status: str) -> bool:
+        """True if the driver did not finish and should be excluded from the target."""
+        # Not including Disqualified because usually it happens after the race
+        if status is None:
+            return False  # fallback > no signal
+        if (
+            status == "Retired"
+            or status == "Accident"
+            or status == "Withdrew"
+            or status == "Did not start"
+            or status == "Collision damage"
+        ):
+            return True
+        else:
+            return False
+
     def build_history_rows(
         self,
         quali_results: pd.DataFrame,
@@ -92,6 +108,11 @@ class HistoryBuilder:
             )
             is_podium = race_row["Position"] in (1, 2, 3) if pd.notna(race_row["Position"]) else False
 
+            status = race_row["Status"]
+            position = race_row["Position"]
+            if self._is_unclassified_dnf(status) or pd.isna(position):
+                position = np.nan  # esclusa, non "ultimo posto"
+
             rows.append(
                 {
                     "race_date": race_date,  # race identifier
@@ -104,10 +125,10 @@ class HistoryBuilder:
                     "circuit_id": circuit_location,  # circuit identifier
                     "quali_position": quali_position,
                     "grid_position": grid_position,
-                    "race_position": race_row["Position"],
+                    "race_position": position,
                     "points_scored": race_row["Points"],
                     "laps_completed": race_row["Laps"],
-                    "status_raw": race_row["Status"],
+                    "status_raw": status,
                     "is_podium": is_podium,
                 }
             )

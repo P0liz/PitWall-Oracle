@@ -217,5 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# MLflow local tracking
+mlruns/
+mlflow.db
+.optuna_sqlite.db  # se deciderai di rendere persistente anche Optuna
+
 # Custom
 data_files/
