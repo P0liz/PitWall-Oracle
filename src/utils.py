@@ -1,6 +1,27 @@
 import logging
 import sys
+import numpy as np
+import pandas as pd
 from logging.handlers import RotatingFileHandler
+from .config import TIME_PENALTY_THRESHOLD
+
+
+def got_end_penalty(driver_abb: str, race_laps: pd.DataFrame, race_results: pd.DataFrame):
+    """
+    Checks if the driver got a penalty at the end of the race
+    """
+    driver_laps = race_laps[race_laps["Driver"] == driver_abb]
+    total_laps = race_laps["LapNumber"].max()
+    ending_position = driver_laps.loc[driver_laps["LapNumber"] == total_laps, "Position"]
+    if ending_position.empty:
+        return False  # driver did not finish the race
+    official_position = race_results.loc[race_results["Abbreviation"] == driver_abb, "Position"].iloc[0]
+    if np.isnan(official_position) or np.isnan(ending_position.iloc[0]):
+        return False  # defensive
+
+    # Considering only big results changes to be excluded
+    fixed_ending_position = ending_position.iloc[0] + TIME_PENALTY_THRESHOLD
+    return official_position > fixed_ending_position
 
 
 def setup_custom_logger(name):

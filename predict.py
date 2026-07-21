@@ -1,9 +1,10 @@
 from xgboost import XGBRanker
+from src.trainer import TO_DROP
 from src.data.gold_layer import GoldLayer
 from src.data.data_loader import DataLoader
 
 NEW_YEAR = 2026
-PREDICT_RACE = 8  # numero gara da predire
+PREDICT_RACE = 7  # numero gara da predire
 champion_path = "models/pitwall_oracle_2026_7.json"
 
 # Inference
@@ -12,17 +13,16 @@ champion_model.load_model(champion_path)
 gold = GoldLayer()
 data_loader = DataLoader()
 
-race_results = gold.build_features(NEW_YEAR, PREDICT_RACE, force=True)
-race_df = race_results[-1]
+# race_df = gold.build_prediction_features(NEW_YEAR, PREDICT_RACE, 5, force=True)
+results = gold.build_features(NEW_YEAR, PREDICT_RACE, force=True)
+race_df = results[-1]
 cutoff_date = race_df["race_date"].iloc[0]
 race_df["driver_id_raw"] = race_df["driver_id"].copy()  # salva prima dell'encoding
 for col in ["driver_id", "team_id"]:
     race_df[col] = data_loader.apply_target_encoding(race_df, col, cutoff_date=cutoff_date)
 race_df["circuit_id"] = race_df["circuit_id"].astype(data_loader.circuit_dtype)
 
-X_new = race_df.drop(
-    [col for col in ["target", "race_number", "race_date", "driver_id_raw"] if col in race_df.columns], axis=1
-)
+X_new = race_df.drop([col for col in TO_DROP + ["driver_id_raw"] if col in race_df.columns], axis=1)
 scores = champion_model.predict(X_new)
 
 predictions = race_df[["driver_id_raw"]].copy()

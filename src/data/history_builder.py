@@ -3,7 +3,7 @@ import numpy as np
 import warnings
 from pathlib import Path
 from src.config import DATA_DIR, TEAM_ID_MAPPING
-from src.utils import setup_custom_logger
+from src.utils import setup_custom_logger, got_end_penalty
 
 log = setup_custom_logger("DataLoader")
 
@@ -33,6 +33,7 @@ class HistoryBuilder:
         race_number: str,
         quali_results: pd.DataFrame,
         race_results: pd.DataFrame,
+        race_laps: pd.DataFrame,
         circuit_location: str,
         race_date,
     ):
@@ -52,6 +53,7 @@ class HistoryBuilder:
         new_history_rows = self.build_history_rows(
             quali_results=quali_results,
             race_results=race_results,
+            race_laps=race_laps,
             race_number=race_number,
             race_date=race_date,
             year=year,
@@ -88,6 +90,7 @@ class HistoryBuilder:
         self,
         quali_results: pd.DataFrame,
         race_results: pd.DataFrame,
+        race_laps: pd.DataFrame,
         race_number: str,
         race_date: pd.Timestamp,
         year: int,
@@ -110,7 +113,11 @@ class HistoryBuilder:
 
             status = race_row["Status"]
             position = race_row["Position"]
-            if self._is_unclassified_dnf(status) or pd.isna(position):
+            if (
+                self._is_unclassified_dnf(status)
+                or pd.isna(position)
+                or got_end_penalty(quali_results["Abbreviation"].iloc[0], race_laps, race_results)
+            ):
                 position = np.nan  # esclusa, non "ultimo posto"
 
             rows.append(

@@ -1,4 +1,26 @@
+GLOBAL_SEED = 2026
 DATA_DIR = "data_files"
+
+# Gold layer
+MIN_VALID_LAPS = 5
+ROLLING_DNF_WINDOW = 10
+CURRENT_FORM_RACES = 3
+CONSISTENCY_WINDOW = 10
+COMPONENTS_PENALTY_THRESHOLD = 3
+
+# Optimized training
+TIME_PENALTY_THRESHOLD = 2
+TOLLERANCE = 0.003
+
+to_log = {
+    "min_valid_laps": MIN_VALID_LAPS,
+    "rolling_dnf_window": ROLLING_DNF_WINDOW,
+    "current_form_races": CURRENT_FORM_RACES,
+    "consistency_window": CONSISTENCY_WINDOW,
+    "components_penalty_threshold": COMPONENTS_PENALTY_THRESHOLD,
+    "time_penalty_threshold": TIME_PENALTY_THRESHOLD,
+    "tollerance": TOLLERANCE,
+}
 
 TEAM_ID_MAPPING = {
     "Alfa Romeo": "audi_lineage",
@@ -66,6 +88,50 @@ CIRCUIT_COORDS = {
     "Yas Marina": (54.601, 24.471),
     "Yas Island": (24.4672, 54.6031),
     "Zandvoort": (4.541, 52.389),
+}
+
+IS_STREET_CIRCUIT = {
+    "Austin": False,
+    "Baku": True,
+    "Barcelona": False,
+    "Buenos Aires": False,
+    "Budapest": False,
+    "Dix": False,
+    "Estoril": False,
+    "Hockenheim": False,
+    "Imola": False,
+    "Indianapolis": False,
+    "Istanbul": False,
+    "Jacarepaguá": False,
+    "Jeddah": True,
+    "Johannesburg": False,
+    "Las Vegas": True,
+    "Le Castellet": False,
+    "Lusail": False,
+    "Madrid": True,
+    "Magny-Cours": False,
+    "Melbourne": True,
+    "Mexico City": False,
+    "Miami": True,
+    "Monaco": True,
+    "Montréal": True,
+    "Monza": False,
+    "Nürburg": False,
+    "Portimão": False,
+    "Sakhir": False,
+    "São Paulo": False,
+    "Scarperia e San Piero": False,
+    "Sepang": False,
+    "Shanghai": False,
+    "Silverstone": False,
+    "Marina Bay": True,
+    "Sochi": True,
+    "Spa-Francorchamps": False,
+    "Spielberg": False,
+    "Suzuka": False,
+    "Yas Marina": False,
+    "Yas Island": False,
+    "Zandvoort": False,
 }
 
 

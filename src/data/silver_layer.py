@@ -66,6 +66,10 @@ class SilverLayer:
                 # Keep only laps that are within 4% of the driver's last lap time
                 # Discard any Nan laptimes
                 if df.iloc[i]["LapTime"] > time_reference * TIME_THRESHOLD:
+                    # Discard stupidly long times
+                    if df.iloc[i]["LapTime"] > time_reference * 1.2:
+                        to_drop.append(i)
+                        continue
                     # Check if the times switch from quali to race sim
                     if i < df.shape[0] - 3:
                         new_ref_first = df.iloc[i]["LapTime"]
@@ -86,6 +90,9 @@ class SilverLayer:
             df["LapTime"] = df["LapTime"].dt.total_seconds()
             df.to_parquet(self.data_dir / filename)
         return df
+
+    def get_untouched_laps(self, year: int, race_number: int, session: int, force: bool):
+        return self.bronze.get_raw_laps(year, race_number, session)
 
     def get_clean_results(self, year: int, race_number: int, session: int, force: bool):
         """
@@ -195,7 +202,9 @@ class SilverLayer:
             return pd.read_parquet(self.data_dir / filename)
 
         # Get raw weather data and compute probability
-        raw_df = self.bronze.get_raw_weather(year, race_number, session, latitude, longitude, race_datetime_utc, future)
+        raw_df = self.bronze.get_raw_weather(
+            year, race_number, session, latitude, longitude, race_datetime_utc, future, force
+        )
         hourly_df = raw_df.dropna(subset=["value"])
 
         if hourly_df.empty:

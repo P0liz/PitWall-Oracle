@@ -12,9 +12,6 @@ STATIC_ENDING_YEAR = 2025
 NEW_YEAR = 2026
 TEST_SET_DIM = 8
 
-# TODO: consider adding preprocessing pipeline via scikit learn if there is
-# missing data that causes errors
-
 # TODO: rework sprint weekends mapping system
 # don't like the idea of having 10 ifs to decide which case i am
 # have a dictionary with different cases and based on year and weekend type we get the correct sessions mapping
@@ -60,19 +57,23 @@ class DataLoader:
                 race_date = event[f"Session{sprint_race_session}Date"].iloc[0]
                 quali_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, sprint_race_session - 1, force)
                 race_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, sprint_race_session, force)
+                race_laps = self.gold.silver.get_untouched_laps(STARTING_YEAR - 1, i, sprint_race_session, force)
                 if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
                     race_date = race_date.tz_convert("UTC").tz_localize(None)
                 self.history_builder.update_history(
-                    STARTING_YEAR - 1, i, quali_results, race_results, location, race_date
+                    STARTING_YEAR - 1, i, quali_results, race_results, race_laps, location, race_date
                 )
             # Actual race
             race_date = event["Session5Date"].iloc[0]
             quali_session = 2 if (STARTING_YEAR - 1 <= 2023) and (event["EventFormat"].iloc[0] != "conventional") else 4
             quali_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, quali_session, force)
             race_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, 5, force)
+            race_laps = self.gold.silver.get_untouched_laps(STARTING_YEAR - 1, i, 5, force)
             if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
                 race_date = race_date.tz_convert("UTC").tz_localize(None)
-            self.history_builder.update_history(STARTING_YEAR - 1, i, quali_results, race_results, location, race_date)
+            self.history_builder.update_history(
+                STARTING_YEAR - 1, i, quali_results, race_results, race_laps, location, race_date
+            )
 
         # 2. Separate data and build features for static set
         all_races = []

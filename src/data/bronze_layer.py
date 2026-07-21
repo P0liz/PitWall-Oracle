@@ -79,6 +79,7 @@ class BronzeLayer:
         longitude: float,
         race_datetime_utc: pd.Timestamp,
         future: bool = False,
+        force: bool = False,
     ):
         """
         future=False -> Archive API, precipitation in mm (historical training set).
@@ -86,7 +87,7 @@ class BronzeLayer:
         Saves raw hourly data as parquet, same pattern as FastF1 raw data.
         """
         filename = f"{year}_{race_number}_{session}_raw_weather.parquet"
-        if filename in os.listdir(self.data_dir):
+        if filename in os.listdir(self.data_dir) and not future and not force:
             return pd.read_parquet(self.data_dir / filename)
 
         race_date = race_datetime_utc.date().isoformat()
