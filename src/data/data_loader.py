@@ -2,7 +2,6 @@ import fastf1
 import pandas as pd
 from src.utils import setup_custom_logger
 from src.data.gold_layer import GoldLayer
-from src.data.history_builder import HistoryBuilder
 import datetime
 
 categorical_cols = ["driver_id", "team_id"]
@@ -17,12 +16,14 @@ TEST_SET_DIM = 8
 # have a dictionary with different cases and based on year and weekend type we get the correct sessions mapping
 # same changes to apply to gold_layer
 
+log = setup_custom_logger("DataLoader")
+
 
 class DataLoader:
     def __init__(self):
         self.gold = GoldLayer()
-        self.history_builder = HistoryBuilder(self.gold.silver)
-        self.log = setup_custom_logger("DataLoader")
+        self.history_builder = self.gold.history_builder
+        self.log = log
         self.history_df = self.history_builder.get_history()
         self.circuit_dtype = (
             pd.CategoricalDtype(
@@ -36,6 +37,7 @@ class DataLoader:
         )
         self.train_df = None
         self.test_df = None
+        self.dnf_df = None
 
     # Single access point to the data
     async def load(self, last_date: datetime = None, force=False):
@@ -44,9 +46,9 @@ class DataLoader:
         pre_n_races = pre_schedule["RoundNumber"].max()
 
         # 1. Build precedent history
-        # Load last 10 reaces of the year before STARTING_YEAR in the history
+        # Load races of the year before STARTING_YEAR in the history
         self.log.info(f"Building history for {STARTING_YEAR - 1} season...")
-        for i in range(pre_n_races - 9, pre_n_races + 1):
+        for i in range(1, pre_n_races + 1):
             self.log.info(f"Building history for round {i} of {STARTING_YEAR - 1} season...")
             event = self.gold.silver.get_clean_event_metadata(STARTING_YEAR - 1, i, force)
             location = event["Location"].iloc[0]
@@ -61,7 +63,14 @@ class DataLoader:
                 if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
                     race_date = race_date.tz_convert("UTC").tz_localize(None)
                 self.history_builder.update_history(
-                    STARTING_YEAR - 1, i, quali_results, race_results, race_laps, location, race_date
+                    STARTING_YEAR - 1,
+                    i,
+                    sprint_race_session,
+                    quali_results,
+                    race_results,
+                    race_laps,
+                    location,
+                    race_date,
                 )
             # Actual race
             race_date = event["Session5Date"].iloc[0]
@@ -72,7 +81,7 @@ class DataLoader:
             if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
                 race_date = race_date.tz_convert("UTC").tz_localize(None)
             self.history_builder.update_history(
-                STARTING_YEAR - 1, i, quali_results, race_results, race_laps, location, race_date
+                STARTING_YEAR - 1, i, 5, quali_results, race_results, race_laps, location, race_date
             )
 
         # 2. Separate data and build features for static set
@@ -118,6 +127,7 @@ class DataLoader:
 
         self.train_df = pd.concat(train_parts, ignore_index=True) if train_parts else pd.DataFrame()
         self.test_df = pd.concat(test_parts, ignore_index=True) if test_parts else pd.DataFrame()
+        self.dnf_df = pd.concat([self.train_df, self.test_df], ignore_index=True)
 
         # Drop target nan
         self.train_df = self.train_df.dropna(subset=["target"])

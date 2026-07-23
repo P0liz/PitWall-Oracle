@@ -4,8 +4,8 @@ from src.data.gold_layer import GoldLayer
 from src.data.data_loader import DataLoader
 
 NEW_YEAR = 2026
-PREDICT_RACE = 7  # numero gara da predire
-champion_path = "models/pitwall_oracle_2026_7.json"
+PREDICT_RACE = 10  # numero gara da predire
+champion_path = "models/pitwall_oracle_2026_10.json"
 
 # Inference
 champion_model = XGBRanker()
@@ -30,7 +30,7 @@ predictions.columns = ["driver_id"]
 predictions["score"] = scores
 print(predictions.sort_values("score", ascending=False).reset_index(drop=True))
 
-"""
+
 predictions["actual_position"] = (race_df["target"].max() - race_df["target"] + 1).values
 predictions["predicted_position"] = predictions["score"].rank(ascending=False).astype(int)
 
@@ -44,4 +44,3 @@ def topn_exact_accuracy(n):
 print(f"Podio exact accuracy: {topn_exact_accuracy(3):.0%}")
 for n in [5, 10, 20]:
     print(f"Top-{n} exact accuracy: {topn_exact_accuracy(n):.0%}")
-"""

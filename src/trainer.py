@@ -5,10 +5,9 @@ from src.data.data_loader import DataLoader
 import os
 from pathlib import Path
 from src.utils import setup_custom_logger
-from .config import GLOBAL_SEED
+from .config import GLOBAL_SEED, DEFAULT_DECAY_RATE
 
-DEFAULT_DECAY_RATE = 0.01
-TO_DROP = ["target", "race_number", "race_date"]
+TO_DROP = ["target", "technical_dnf_target", "race_number", "race_date"]
 
 
 def make_weights(race_dates: pd.Series, decay_rate: float, reference_date: pd.Timestamp) -> np.ndarray:

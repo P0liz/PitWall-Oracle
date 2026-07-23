@@ -15,8 +15,27 @@ import traceback
 import hashlib
 
 BASE_MODEL = "pitwall_oracle_base.json"
-FORCE = True
+LATEST_MODEL = "pitwall_oracle_latest.json"
+FORCE = False
 RUN_HPO = True  # Imposta a True se vuoi rieseguire la ricerca parametri con Optuna
+
+
+def zscore_within_race(values: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """
+    Standardizza un vettore all'interno di una singola gara.
+
+    Il risultato ha media circa 0 e deviazione standard circa 1.
+    In caso di vettore costante restituisce zeri.
+    """
+    values = np.asarray(values, dtype=np.float64)
+
+    mean = np.mean(values)
+    std = np.std(values, ddof=0)
+
+    if not np.isfinite(std) or std < eps:
+        return np.zeros_like(values, dtype=np.float64)
+
+    return (values - mean) / std
 
 
 def run_pipeline():
@@ -24,6 +43,8 @@ def run_pipeline():
 
     # Inizializziamo MLflow Parent Run per l'intero ciclo di addestramento/test
     with mlflow.start_run(run_name=f"F1_Season_Simulation_{NEW_YEAR}") as parent_run:
+        mlflow.set_tag("model_type", "ranking")
+        mlflow.log_param("simulation_year", NEW_YEAR)
 
         # ----------------- PHASE 1: STATIC TRAINING & HPO -----------------
         trainer_static = StaticTraining(data_loader)
@@ -50,7 +71,8 @@ def run_pipeline():
         def dataset_hash(df: pd.DataFrame) -> str:
             return hashlib.sha256(pd.util.hash_pandas_object(df, index=True).values).hexdigest()
 
-        mlflow.log_param("train_dataset_hash", dataset_hash(trainer_static.train_df))
+        ranking_columns = trainer_static.train_df.drop(columns=TO_DROP, errors="ignore")
+        mlflow.log_param("train_dataset_hash", dataset_hash(ranking_columns))
 
         # Salvataggio e logging del modello base
         trainer_static.save_artifacts(BASE_MODEL)
@@ -84,12 +106,21 @@ def run_pipeline():
         trainer_dynamic.log.info("Inizio testing su gare dinamiche...")
         challenger = None
         # Metrics setup
-        oos_residuals = []  # per sigma empirico
+        oos_relative_residuals: list[np.ndarray] = []
+        race_score_spreads: list[float] = []
         duel_history = []  # cronologia duelli per regression moving average
         recent_ndcgs = []  # saving ndcgs to compute perquential moving average
         for idx, date in enumerate(races):
             race_idx = idx + 1
             trainer_dynamic.log.info(f"Elaborazione gara del {date.date()}")
+
+            # Delete possibly old weather parquet
+            if race_idx == len(races):
+                dir = data_loader.gold.data_dir
+                (dir / "silver" / f"{NEW_YEAR}_{race_idx}_5_clean_weather.parquet").unlink(missing_ok=True)
+                (dir / "silver" / f"{NEW_YEAR}_{race_idx}_3_clean_weather.parquet").unlink(missing_ok=True)
+                (dir / "bronze" / f"{NEW_YEAR}_{race_idx}_5_raw_weather.parquet").unlink(missing_ok=True)
+                (dir / "bronze" / f"{NEW_YEAR}_{race_idx}_3_raw_weather.parquet").unlink(missing_ok=True)
 
             # Carichiamo il Champion corrente
             champion_model = XGBRanker()
@@ -133,10 +164,33 @@ def run_pipeline():
                 f"media cumulativa: {tracker.cumulative_mean():.4f}"
             )
 
-            # per il calcolo del sigma alla fine
-            race_residuals = scores_champion - race_df["target"].to_numpy()
-            oos_residuals.extend(race_residuals.tolist())
-            mlflow.log_metric("race_residual_std", np.std(race_residuals), step=race_idx)
+            # Calibrazione del sigma relativo per Monte Carlo
+            target_values = race_df["target"].to_numpy(dtype=np.float64)
+
+            standardized_scores = zscore_within_race(scores_champion)
+            standardized_targets = zscore_within_race(target_values)
+
+            relative_residuals = standardized_scores - standardized_targets
+
+            oos_relative_residuals.append(relative_residuals)
+
+            score_spread = float(np.std(scores_champion, ddof=0))
+            race_score_spreads.append(score_spread)
+
+            race_sigma_relative = float(np.std(relative_residuals, ddof=0))
+            cumulative_relative_residuals = np.concatenate(oos_relative_residuals)
+            cumulative_sigma_relative = float(np.std(cumulative_relative_residuals, ddof=0))
+
+            mlflow.log_metric("race_sigma_relativo", race_sigma_relative, step=race_idx)
+            mlflow.log_metric("cumulative_sigma_relativo", cumulative_sigma_relative, step=race_idx)
+            mlflow.log_metric("race_score_std", score_spread, step=race_idx)
+
+            trainer_dynamic.log.info(
+                f"[{NEW_YEAR}_{race_idx}] "
+                f"sigma relativo={race_sigma_relative:.4f} | "
+                f"sigma relativo cumulativo={cumulative_sigma_relative:.4f} | "
+                f"score std={score_spread:.4f}"
+            )
 
             if challenger is not None:
                 # Confronto Champion vs Challenger su dataset di test fisso (Shadow Test)
@@ -166,7 +220,7 @@ def run_pipeline():
                     champion_path = trainer_dynamic.model_dir / new_filename
 
                     # Salviamo il nuovo Champion su MLflow
-                    mlflow.log_artifact(str(champion_path), artifact_path=f"models/race_{race_idx}")
+                    mlflow.log_artifact(str(champion_path), artifact_path=f"models")
                     mlflow.log_metric("challenger_promoted", 1.0, step=race_idx)
 
                     trainer_dynamic.log.info(
@@ -186,11 +240,31 @@ def run_pipeline():
             trainer_dynamic.ranker = XGBRanker(**best_params)
             challenger = trainer_dynamic.train()
 
-        trainer_dynamic.save_artifacts("pitwall_oracle_latest.json")
+        # Salva e pubblica il modello più recente, addestrato fino all'ultima gara disponibile.
+        trainer_dynamic.save_artifacts(LATEST_MODEL)
+        mlflow.log_artifact(str(os.path.join(trainer_static.model_dir, LATEST_MODEL)), artifact_path="models")
         # Calcolo finale delle metriche residue (Fattore sigma empirico per Monte Carlo)
-        sigma_empirico = np.std(np.array(oos_residuals))
-        mlflow.log_metric("final_sigma_empirico", sigma_empirico)
-        trainer_dynamic.log.info(f"Simulazione completata. Sigma empirico calcolato: {sigma_empirico:.4f}")
+        if not oos_relative_residuals:
+            raise RuntimeError("Impossibile calibrare il sigma: nessun residuo " "out-of-sample è stato raccolto.")
+
+        all_relative_residuals = np.concatenate(oos_relative_residuals)
+
+        sigma_relativo_empirico = float(np.std(all_relative_residuals, ddof=0))
+
+        mean_score_spread = float(np.mean(race_score_spreads))
+        median_score_spread = float(np.median(race_score_spreads))
+
+        mlflow.log_metric("final_sigma_relativo_empirico", sigma_relativo_empirico)
+        mlflow.log_metric("calibration_mean_score_std", mean_score_spread)
+        mlflow.log_metric("calibration_median_score_std", median_score_spread)
+        mlflow.log_param("sigma_calibration_method", "within_race_zscore_oos_residual_std")
+
+        trainer_dynamic.log.info(
+            "Calibrazione Monte Carlo completata. "
+            f"Sigma relativo empirico: {sigma_relativo_empirico:.4f} | "
+            f"score std medio: {mean_score_spread:.4f} | "
+            f"score std mediano: {median_score_spread:.4f}"
+        )
 
 
 if __name__ == "__main__":
@@ -204,7 +278,7 @@ if __name__ == "__main__":
 
     # 3. Registra l'esperimento (ora che il server è garantito come attivo)
     try:
-        mlflow.set_experiment("PitWall_Oracle_Prequential_Pipeline")
+        mlflow.set_experiment("PitWall_Oracle_Ranking")
     except Exception as e:
         print(f"[❌] Connessione a MLflow fallita: {e}")
         if mlflow_process:

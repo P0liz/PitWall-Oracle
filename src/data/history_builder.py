@@ -1,17 +1,17 @@
 import pandas as pd
 import numpy as np
-import warnings
 from pathlib import Path
 from src.config import DATA_DIR, TEAM_ID_MAPPING
-from src.utils import setup_custom_logger, got_end_penalty
+from src.utils import setup_custom_logger, got_end_penalty, get_driver_fastest_quali_time
 
 log = setup_custom_logger("DataLoader")
 
 
 class HistoryBuilder:
-    def __init__(self, silver):
+    def __init__(self, silver, feature_engineer):
         self.history_path = Path(DATA_DIR) / "gold" / "driver_team_history.parquet"
         self.silver = silver
+        self.feature_engineer = feature_engineer
         self.log = log
 
     def get_history_up_to(self, race_date):
@@ -31,6 +31,7 @@ class HistoryBuilder:
         self,
         year: int,
         race_number: str,
+        session: int,
         quali_results: pd.DataFrame,
         race_results: pd.DataFrame,
         race_laps: pd.DataFrame,
@@ -55,6 +56,7 @@ class HistoryBuilder:
             race_results=race_results,
             race_laps=race_laps,
             race_number=race_number,
+            session=session,
             race_date=race_date,
             year=year,
             circuit_location=circuit_location,
@@ -92,13 +94,15 @@ class HistoryBuilder:
         race_results: pd.DataFrame,
         race_laps: pd.DataFrame,
         race_number: str,
+        session: int,
         race_date: pd.Timestamp,
         year: int,
         circuit_location: str,
     ):
         rows = []
         for _, race_row in race_results.iterrows():
-            quali_row = quali_results.loc[quali_results["Abbreviation"] == race_row["Abbreviation"]]
+            driver_id = build_driver_id(race_row["Abbreviation"], race_row["FirstName"], race_row["LastName"])
+            quali_row = quali_results.loc[quali_results["driver_id"] == driver_id]
             quali_position = (
                 quali_row["Position"].iloc[0]
                 if not quali_row.empty and pd.notna(quali_row["Position"].iloc[0])
@@ -116,27 +120,40 @@ class HistoryBuilder:
             if (
                 self._is_unclassified_dnf(status)
                 or pd.isna(position)
-                or got_end_penalty(quali_results["Abbreviation"].iloc[0], race_laps, race_results)
+                or got_end_penalty(race_row["Abbreviation"], race_laps, race_results)
             ):
                 position = np.nan  # esclusa, non "ultimo posto"
 
+            # super_time = float(race_laps.loc[race_laps["Driver"] == race_row["Abbreviation"], "LapTime"].dt.total_seconds().min())
+            quali_time = get_driver_fastest_quali_time(quali_results, driver_id)
+
+            lap_1_position = race_laps.loc[
+                (race_laps["Driver"] == race_row["Abbreviation"]) & (race_laps["LapNumber"] == 1), "Position"
+            ]
+
+            rain_probability = self.feature_engineer.get_rain_probability(
+                year, race_number, session, circuit_location, race_date, force=True
+            )
+
+            # WATCH OUT: when chainging data in the history, delete the parquet
             rows.append(
                 {
                     "race_date": race_date,  # race identifier
                     "race_number": race_number,  # race data
                     "year": year,  # race data
-                    "driver_id": build_driver_id(
-                        race_row["Abbreviation"], race_row["FirstName"], race_row["LastName"]
-                    ),  # driver identifier
+                    "driver_id": driver_id,  # driver identifier
                     "team_id": map_team_id(race_row["TeamName"]),  # team identifier
                     "circuit_id": circuit_location,  # circuit identifier
                     "quali_position": quali_position,
                     "grid_position": grid_position,
+                    "lap_1_position": lap_1_position.iloc[0] if not lap_1_position.empty else np.nan,
                     "race_position": position,
                     "points_scored": race_row["Points"],
                     "laps_completed": race_row["Laps"],
+                    "quali_time": quali_time,
                     "status_raw": status,
                     "is_podium": is_podium,
+                    "rain_probability": rain_probability,
                 }
             )
 

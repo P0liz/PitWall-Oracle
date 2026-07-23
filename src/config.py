@@ -1,25 +1,63 @@
-GLOBAL_SEED = 2026
+GLOBAL_SEED = 2003
 DATA_DIR = "data_files"
 
 # Gold layer
 MIN_VALID_LAPS = 5
-ROLLING_DNF_WINDOW = 10
+MIN_DEV_RACES = 5
+ROLLING_DNF_WINDOW = 15
 CURRENT_FORM_RACES = 3
 CONSISTENCY_WINDOW = 10
 COMPONENTS_PENALTY_THRESHOLD = 3
+WET_WEATHER_THRESHOLD = 0.3
 
 # Optimized training
+DEFAULT_DECAY_RATE = 0.005
 TIME_PENALTY_THRESHOLD = 2
 TOLLERANCE = 0.003
 
+# Optimized dnf
+DEFAULT_C_VALUES = (0.0001, 0.001, 0.003, 0.01, 0.1, 1.0, 10.0, 100.0)
+DEFAULT_CLASS_WEIGHTS = (None, "balanced")
+
 to_log = {
     "min_valid_laps": MIN_VALID_LAPS,
+    "min_dev_races": MIN_DEV_RACES,
     "rolling_dnf_window": ROLLING_DNF_WINDOW,
     "current_form_races": CURRENT_FORM_RACES,
     "consistency_window": CONSISTENCY_WINDOW,
     "components_penalty_threshold": COMPONENTS_PENALTY_THRESHOLD,
+    "wet_weather_threshold": WET_WEATHER_THRESHOLD,
+    "default_decay_rate": DEFAULT_DECAY_RATE,
     "time_penalty_threshold": TIME_PENALTY_THRESHOLD,
     "tollerance": TOLLERANCE,
+    "default_c_values": DEFAULT_C_VALUES,
+    "default_class_weights": DEFAULT_CLASS_WEIGHTS,
+}
+
+# Custom grid positions for latest prediction
+CUSTOM_GRID = {
+    "ant_kimi_antonelli": 1,
+    "ver_max_verstappen": 2,
+    "rus_george_russell": 3,
+    "lec_charles_leclerc": 4,
+    "ham_lewis_hamilton": 5,
+    "pia_oscar_piastri": 6,
+    "lin_arvid_lindblad": 7,
+    "bor_gabriel_bortoleto": 8,
+    "law_liam_lawson": 9,
+    "gas_pierre_gasly": 10,
+    "col_franco_colapinto": 11,
+    "hul_nico_hulkenberg": 12,
+    "nor_lando_norris": 13,
+    "sai_carlos_sainz": 14,
+    "bea_oliver_bearman": 15,
+    "alb_alexander_albon": 16,
+    "oco_esteban_ocon": 17,
+    "bot_valtteri_bottas": 18,
+    "per_sergio_perez": 19,
+    "alo_fernando_alonso": 20,
+    "had_isack_hadjar": 21,
+    "str_lance_stroll": 22,
 }
 
 TEAM_ID_MAPPING = {

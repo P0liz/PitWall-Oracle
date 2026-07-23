@@ -24,6 +24,15 @@ def got_end_penalty(driver_abb: str, race_laps: pd.DataFrame, race_results: pd.D
     return official_position > fixed_ending_position
 
 
+def get_driver_fastest_quali_time(quali_results_df: pd.DataFrame, driver_id: str):
+    q1 = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Q1"].dt.total_seconds()
+    q2 = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Q2"].dt.total_seconds()
+    q3 = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Q3"].dt.total_seconds()
+
+    times = [q1, q2, q3]
+    return np.nanmin(times)
+
+
 def setup_custom_logger(name):
     # 1. Create a custom logger
     logger = logging.getLogger(name)

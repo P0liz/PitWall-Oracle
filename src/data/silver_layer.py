@@ -202,9 +202,7 @@ class SilverLayer:
             return pd.read_parquet(self.data_dir / filename)
 
         # Get raw weather data and compute probability
-        raw_df = self.bronze.get_raw_weather(
-            year, race_number, session, latitude, longitude, race_datetime_utc, future, force
-        )
+        raw_df = self.bronze.get_raw_weather(year, race_number, session, latitude, longitude, race_datetime_utc, future)
         hourly_df = raw_df.dropna(subset=["value"])
 
         if hourly_df.empty:

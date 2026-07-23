@@ -224,3 +224,4 @@ mlflow.db
 
 # Custom
 data_files/
+results/
