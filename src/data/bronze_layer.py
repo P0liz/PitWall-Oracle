@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from pathlib import Path
 import requests
-from src.config import DATA_DIR, FORECAST_URL, ARCHIVE_URL
+from src.config import ARCHIVE_URL, DATA_DIR, FORECAST_URL
 
 
 class BronzeLayer:
@@ -40,6 +40,28 @@ class BronzeLayer:
             results = data.results
             df = pd.DataFrame(data=results).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
+        return df
+
+    def get_raw_pit_stops(self, year: int, race_number: int):
+        """
+        Return the main-race pit stops published by the Jolpica Ergast-compatible API.
+
+        Jolpica's ``duration`` is the total pit-lane traversal time, not only
+        the stationary wheel-change time. The raw value is retained here and
+        converted to seconds in Silver.
+        """
+        filename = f"{year}_{race_number}_raw_pit_stops.parquet"
+        path = self.data_dir / filename
+        if path.exists():
+            return pd.read_parquet(path)
+
+        response = fastf1.ergast.Ergast(result_type="pandas", auto_cast=True, limit=100).get_pit_stops(
+            season=year, round=race_number
+        )
+        columns = ["driverId", "lap", "stop", "time", "duration"]
+        frames = [pd.DataFrame(frame) for frame in response.content if not frame.empty]
+        df = pd.concat(frames, ignore_index=True).reindex(columns=columns) if frames else pd.DataFrame(columns=columns)
+        df.to_parquet(path, index=False)
         return df
 
     def get_event_metadata(self, year: int, race_number: int):

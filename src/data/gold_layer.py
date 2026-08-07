@@ -3,7 +3,13 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from src.config import *
-from src.utils import setup_custom_logger, got_end_penalty
+from src.utils import (
+    setup_custom_logger,
+    got_end_penalty,
+    is_race_dnf,
+    get_session_mapping,
+    POST_RACE_EXCLUSION_STATUSES,
+)
 from .silver_layer import SilverLayer
 from .history_builder import HistoryBuilder
 from .feature_engineer import FeatureEngineering
@@ -34,7 +40,7 @@ class GoldLayer:
         self.log.info(f"Building features for {year} Grand Prix #{race_number}...")
 
         if event["EventFormat"].iloc[0] != "conventional":  # Sprint race
-            sprint_race_session = 3 if year >= 2024 else 4
+            sprint_race_session = get_session_mapping(year, False, "sr", "race")
             results.append(self.get_features(event, year, race_number, session=sprint_race_session, force=force))
         results.append(self.get_features(event, year, race_number, session=5, force=force))
 
@@ -42,12 +48,9 @@ class GoldLayer:
 
     # Does not use race_results, only for predictions
     def build_prediction_features(self, year: int, race_number: int, session: int, force: bool = False):
-        """
-        driver_list: DataFrame con colonne [driver_id, team_id, Abbreviation, GridPosition]
-        """
         assert year >= 2022
         assert 1 <= race_number <= 24
-        assert (session == 3) or (session == 5), "Predictions only on race sessions"
+        assert session in [3, 5], "Predictions only on race sessions"
         event = self.silver.get_clean_event_metadata(year, race_number, force)
 
         results = self.get_features(event, year, race_number, session, force, prediction_mode=True)
@@ -67,8 +70,10 @@ class GoldLayer:
         if filename in os.listdir(self.data_dir) and not force:
             # Load from file
             gold_df = pd.read_parquet(self.data_dir / filename)
-            if "technical_dnf_target" not in gold_df.columns:
-                self.log.info(f"Rigenerazione di {filename}: target DNF assente nel parquet Gold.")
+            required_metadata = {"dnf_target", "raw_driver_id", "raw_team_id", "session_type"}
+            missing_metadata = required_metadata - set(gold_df.columns)
+            if missing_metadata:
+                self.log.info(f"Rigenerazione di {filename}: colonne mancanti {sorted(missing_metadata)}.")
                 gold_df = self.get_gp_features(event, year, race_number, session, force, prediction_mode)
                 gold_df.to_parquet(self.data_dir / filename, index=False)
         else:
@@ -85,56 +90,20 @@ class GoldLayer:
         silver = self.silver
         gold_df = pd.DataFrame()
 
-        if event["EventFormat"].iloc[0] != "conventional" and session == 3 and year >= 2024:  # Sprint race 2024+
-            practice_laps_df = [silver.get_clean_laps(year, race_number, 1, force)]  # FP1
-            race_date = event["Session3Date"].iloc[0]
-            quali_results_df = silver.get_clean_results(year, race_number, 2, force)
-            race_results_df = (
-                silver.get_clean_results(year, race_number, 3, force) if not prediction_mode else pd.DataFrame()
-            )
-            race_laps_df = (
-                silver.get_untouched_laps(year, race_number, 3, force) if not prediction_mode else pd.DataFrame()
-            )
-        elif event["EventFormat"].iloc[0] != "conventional" and session == 4 and year == 2023:  # Sprint race 2023
-            practice_laps_df = [silver.get_clean_laps(year, race_number, 1, force)]  # FP1
-            race_date = event["Session4Date"].iloc[0]
-            quali_results_df = silver.get_clean_results(year, race_number, 3, force)
-            race_results_df = (
-                silver.get_clean_results(year, race_number, 4, force) if not prediction_mode else pd.DataFrame()
-            )
-            race_laps_df = (
-                silver.get_untouched_laps(year, race_number, 4, force) if not prediction_mode else pd.DataFrame()
-            )
-        elif event["EventFormat"].iloc[0] != "conventional" and session == 5:
-            if year == 2023:  # main race 2023
-                practice_laps_df = [silver.get_clean_laps(year, race_number, 4, force)]  # Sprint for data
-                quali_results_df = silver.get_clean_results(year, race_number, 2, force)
-            elif year >= 2024:  # main race 2024+
-                practice_laps_df = [silver.get_clean_laps(year, race_number, 3, force)]  # Sprint for data
-                quali_results_df = silver.get_clean_results(year, race_number, 4, force)
-            else:
-                self.log.error("Years before 2022 are not correctly implemented")
-                raise ValueError("Years before 2022 are not correctly implemented")
-            race_date = event["Session5Date"].iloc[0]
-            race_results_df = (
-                silver.get_clean_results(year, race_number, 5, force) if not prediction_mode else pd.DataFrame()
-            )
-            race_laps_df = (
-                silver.get_untouched_laps(year, race_number, 5, force) if not prediction_mode else pd.DataFrame()
-            )
-        else:  # normal weekend
-            fp1 = silver.get_clean_laps(year, race_number, 1, force)
-            fp2 = silver.get_clean_laps(year, race_number, 2, force)
-            fp3 = silver.get_clean_laps(year, race_number, 3, force)
-            practice_laps_df = [fp1, fp2, fp3]  # All FP sessions
-            race_date = event["Session5Date"].iloc[0]
-            quali_results_df = silver.get_clean_results(year, race_number, session - 1, force)
-            race_results_df = (
-                silver.get_clean_results(year, race_number, session, force) if not prediction_mode else pd.DataFrame()
-            )
-            race_laps_df = (
-                silver.get_untouched_laps(year, race_number, session, force) if not prediction_mode else pd.DataFrame()
-            )
+        is_conventional = event["EventFormat"].iloc[0] == "conventional"
+        race_type = "sr" if session <= 4 else "gp"
+        practice_laps_session = get_session_mapping(year, is_conventional, race_type, "practice_laps")
+        practice_laps_df = silver.get_clean_laps(year, race_number, practice_laps_session, force)
+        practice_results_session = get_session_mapping(year, is_conventional, race_type, "practice_results")
+        practice_results_laps_df = silver.get_clean_laps(year, race_number, practice_results_session, force)
+        quali_session = get_session_mapping(year, is_conventional, race_type, "quali")
+        quali_results_df = silver.get_clean_results(year, race_number, quali_session, force)
+        race_session = get_session_mapping(year, is_conventional, race_type, "race")
+        race_date = event[f"Session{race_session}Date"].iloc[0]
+        race_results_df = silver.get_clean_results(year, race_number, race_session, force)
+        race_laps_df = (
+            silver.get_untouched_laps(year, race_number, race_session, force) if not prediction_mode else pd.DataFrame()
+        )
 
         # Normalize to tz-naive UTC scalar
         if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
@@ -145,19 +114,32 @@ class GoldLayer:
             driver_ids = quali_results_df["driver_id"].unique()
         else:
             driver_ids = np.intersect1d(quali_results_df["driver_id"].unique(), race_results_df["driver_id"].unique())
+
         # leggi la history SOLO fino alla gara precedente (mai quella corrente)
         history_before = self.history_builder.get_history_up_to(race_date)
 
         # Update file containig the state with the new data
         if not prediction_mode:
             self.history_builder.update_history(
-                year, race_number, session, quali_results_df, race_results_df, race_laps_df, circuit_location, race_date
+                year,
+                race_number,
+                session,
+                quali_results_df,
+                race_results_df,
+                race_laps_df,
+                circuit_location,
+                race_date,
+                force=force,
             )
 
         # Get longest stint for each driver in practice laps
         race_sim_best_stint_df = self.find_race_sim_stint(practice_laps_df, quali_results_df["Abbreviation"].unique())
         # race_sim_best_stint_df.to_parquet(f"{year}_{race_number}_{session}_stints.parquet", index=False)
 
+        # Get practice rankings
+        practice_rankings = self.compute_practice_rankings(
+            practice_results_laps_df, quali_results_df["Abbreviation"].unique()
+        )
         # Get weather data
         rain_probability = self.feature_engineer.get_rain_probability(
             year, race_number, session, circuit_location, race_date, force
@@ -171,6 +153,7 @@ class GoldLayer:
             team_id = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "team_id"].iloc[0]
             regs_era = self.feature_engineer.get_regs_era(year)
             abbreviation = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Abbreviation"].iloc[0]
+            team = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "TeamName"].iloc[0]
 
             quali_position = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Position"].iloc[0]
             grid_position = (
@@ -184,6 +167,9 @@ class GoldLayer:
                 "race_date": race_date,
                 "race_number": race_number,
                 "year": year,
+                "session_type": "race" if session == 5 else "sprint",
+                "raw_driver_id": driver_id,
+                "raw_team_id": team_id,
                 "driver_id": driver_id,
                 "team_id": team_id,
                 "circuit_id": circuit_location,
@@ -192,23 +178,32 @@ class GoldLayer:
                     race_sim_best_stint_df, abbreviation
                 ),
                 "teammate_delta_deg": np.nan,  # computed at the end
-                "simulated_race_pace": self.feature_engineer.compute_race_pace(race_sim_best_stint_df, abbreviation),
+                "mean_race_pace": self.feature_engineer.compute_race_pace(race_sim_best_stint_df, abbreviation),
                 "teammate_delta_pace": np.nan,  # computed at the end
+                "late_stint_dropoff": self.feature_engineer.compute_late_stint_dropoff(
+                    race_sim_best_stint_df, abbreviation
+                ),
+                "team_race_pace": self.feature_engineer.compute_team_race_pace(race_sim_best_stint_df, team),
                 "quali_pace": self.feature_engineer.compute_quali_pace(quali_results_df, driver_id),
+                "practice_position": self.feature_engineer.get_practice_position(practice_rankings, abbreviation),
                 "grid_position": grid_position,
                 "teammate_delta_quali": np.nan,  # computed at the end
                 # Categoria B: causali, derivate da fatti grezzi nella history (safe, non target-derived)
-                "rolling_tech_dnf_rate": self.feature_engineer.compute_rolling_dnf_rate(history_before, team_id),
+                "team_dnf_rate": self.feature_engineer.compute_team_dnf_rate(history_before, year, team_id),
+                "driver_dnf_rate": self.feature_engineer.compute_driver_dnf_rate(history_before, year, driver_id),
                 "car_age_proxy": self.feature_engineer.compute_car_age_proxy(
                     history_before, driver_id, year, quali_position, grid_position
                 ),
-                "track_affinity_score": self.feature_engineer.compute_track_affinity(
+                "driver_track_affinity": self.feature_engineer.compute_driver_track_affinity(
                     history_before, driver_id, circuit_location
                 ),
-                "race_current_form": self.feature_engineer.compute_race_current_form(history_before, driver_id),
-                "teammate_delta_race_form": np.nan,
-                # "quali_current_form": self.compute_quali_current_form(history_before, driver_id),
+                "team_track_affinity": self.feature_engineer.compute_team_track_affinity(
+                    history_before, team_id, circuit_location
+                ),
+                "driver_current_form": self.feature_engineer.compute_driver_current_form(history_before, driver_id),
                 "team_current_form": self.feature_engineer.compute_team_current_form(history_before, team_id),
+                "quali_current_form": self.feature_engineer.compute_quali_current_form(history_before, driver_id),
+                "teammate_delta_race_form": np.nan,
                 "driver_consistency": self.feature_engineer.compute_driver_consistency(history_before, driver_id),
                 "avg_positions_gained": self.feature_engineer.compute_avg_positions_gained(history_before, driver_id),
                 "teammate_delta_pos_gained": np.nan,
@@ -216,12 +211,21 @@ class GoldLayer:
                     history_before, driver_id
                 ),
                 "teammate_delta_lap1_pos_gained": np.nan,
+                "driver_recent_race_pace": self.feature_engineer.compute_recent_race_pace(
+                    history_before, year, driver_id
+                ),
                 "overtaking_difficulty": overtaking_difficulty,
                 "team_development": self.feature_engineer.compute_team_development_trend(history_before, team_id, year),
+                "team_pit_execution_index": self.feature_engineer.compute_team_pit_execution_index(
+                    history_before, team_id
+                ),
+                "team_strategy_aggressiveness_score": (
+                    self.feature_engineer.compute_team_strategy_aggressiveness_score(history_before, team_id)
+                ),
                 "wet_affinity": self.feature_engineer.compute_wet_affinity(history_before, driver_id),
                 "teammate_delta_wet_affinity": np.nan,
-                # Target del modello DNF. In prediction mode resta ignoto.
-                "technical_dnf_target": np.nan,
+                # Target DNF all-cause
+                "dnf_target": np.nan,
                 # Categoria C: esterna
                 "forecast_rain_probability": rain_probability,
                 "is_street_circuit": IS_STREET_CIRCUIT[circuit_location],
@@ -229,13 +233,26 @@ class GoldLayer:
             }
 
             if not prediction_mode:
-                position = race_results_df.loc[race_results_df["driver_id"] == driver_id, "Position"].iloc[0]
-                status = race_results_df.loc[race_results_df["driver_id"] == driver_id, "Status"].iloc[0]
-                is_dnf = self.feature_engineer.is_unclassified_dnf(status)
-                row["technical_dnf_target"] = int(is_dnf)  # True = 1 e False = 0
+                result = race_results_df.loc[race_results_df["driver_id"] == driver_id, ["Position", "Status"]]
+
+                if len(result) != 1:
+                    raise ValueError(f"Risultato assente o duplicato: {driver_id}")
+
+                position = result["Position"].iat[0]
+                status = result["Status"].iat[0]
+
+                normalized_status = str(status).strip() if pd.notna(status) and str(status).strip() else None
+
+                is_dnf = is_race_dnf(normalized_status)
+                row["dnf_target"] = np.nan if normalized_status is None else int(is_dnf)
 
                 # Target
-                if is_dnf or pd.isna(position) or got_end_penalty(abbreviation, race_laps_df, race_results_df):
+                if (
+                    is_dnf
+                    or pd.isna(position)
+                    or got_end_penalty(abbreviation, race_laps_df, race_results_df)
+                    or normalized_status in POST_RACE_EXCLUSION_STATUSES
+                ):
                     row["target"] = np.nan  # esclusa dal training
                 else:
                     n_drivers = race_results_df["driver_id"].nunique()
@@ -266,50 +283,49 @@ class GoldLayer:
             # Compute teammate deltas
             self.feature_engineer.compute_teammate_deltas(gold_df, driver_a, driver_b)
 
-    def find_race_sim_stint(
-        self, practice_sessions: list, drivers: list, min_valid_laps: int = MIN_VALID_LAPS
-    ) -> pd.DataFrame:
-        """Find longest stint for each driver, giving preference to FP3, than FP2 and last FP1"""
+    def find_race_sim_stint(self, practice_laps: pd.DataFrame, drivers: list) -> pd.DataFrame:
+        """Find longest stint for each driver, in the given laps (should be laps from only on session)"""
         stints = pd.DataFrame()
         for driver in drivers:
-            fp_stints = {}
-            for idx, fp in enumerate(practice_sessions):
-                driver_laps = fp[fp["Driver"] == driver]
+            driver_laps = practice_laps[practice_laps["Driver"] == driver]
 
-                longest_stint = pd.DataFrame()
-                current_stint = pd.DataFrame()
+            longest_stint = pd.DataFrame()
+            current_stint = pd.DataFrame()
 
-                for i in range(len(driver_laps)):
-                    if current_stint.empty:
-                        current_stint = driver_laps.iloc[[i]]
+            for i in range(len(driver_laps)):
+                if current_stint.empty:
+                    current_stint = driver_laps.iloc[[i]]
+                else:
+                    last_row = current_stint.iloc[-1]  # Get the last row of the current stint
+                    current_row = driver_laps.iloc[i]
+
+                    # If the compound is the same and the lap number is consecutive, add to current stint
+                    if (
+                        current_row["Compound"] == last_row["Compound"]
+                        and current_row["LapNumber"] == last_row["LapNumber"] + 1
+                    ):
+                        current_stint = pd.concat([current_stint, current_row.to_frame().T])
+                    # If the compound changes or the lap number is not consecutive
                     else:
-                        last_row = current_stint.iloc[-1]  # Get the last row of the current stint
-                        current_row = driver_laps.iloc[i]
-
-                        # If the compound is the same and the lap number is consecutive, add to current stint
-                        if (
-                            current_row["Compound"] == last_row["Compound"]
-                            and current_row["LapNumber"] == last_row["LapNumber"] + 1
-                        ):
-                            current_stint = pd.concat([current_stint, current_row.to_frame().T])
-                        # If the compound changes or the lap number is not consecutive
-                        else:
-                            # Check if the current stint is the longest
-                            if len(current_stint) > len(longest_stint):
-                                longest_stint = current_stint
-                            # Prepare for the next stint
-                            current_stint = driver_laps.iloc[[i]]
+                        # Check if the current stint is the longest
+                        if len(current_stint) > len(longest_stint):
+                            longest_stint = current_stint
+                        # Prepare for the next stint
+                        current_stint = driver_laps.iloc[[i]]
 
                 # Check at the end of the loop
                 if len(current_stint) > len(longest_stint):
                     longest_stint = current_stint
-                fp_stints[idx + 1] = longest_stint
 
-            # Choosing preferred session (highest index = latest FP)
-            best_stint = pd.DataFrame()
-            for i in range(len(practice_sessions), 0, -1):
-                if not fp_stints[i].empty and len(fp_stints[i]) >= min_valid_laps:
-                    best_stint = fp_stints[i]
-                    break
-            stints = pd.concat([stints, best_stint], ignore_index=True)
+            stints = pd.concat([stints, longest_stint], ignore_index=True)
         return stints
+
+    def compute_practice_rankings(self, practice_laps: pd.DataFrame, drivers: list) -> pd.DataFrame:
+        """Compute practice rankings based on fastest lap times for each driver."""
+        rankings = []
+        for driver in drivers:
+            driver_laps = practice_laps[practice_laps["Driver"] == driver]
+            if not driver_laps.empty:
+                fastest_lap = driver_laps.loc[driver_laps["LapTime"].idxmin()]
+                rankings.append({"Driver": driver, "FastestLapTime": fastest_lap["LapTime"]})
+        return pd.DataFrame(rankings).sort_values("FastestLapTime").reset_index(drop=True)

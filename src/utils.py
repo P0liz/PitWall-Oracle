@@ -3,7 +3,35 @@ import sys
 import numpy as np
 import pandas as pd
 from logging.handlers import RotatingFileHandler
-from .config import TIME_PENALTY_THRESHOLD
+from .config import TIME_PENALTY_THRESHOLD, SESSION_MAPPING
+
+# Status che indicano una vettura regolarmente classificata al termine della
+# gara. Jolpica/FastF1 normalizza normalmente i distacchi in giri come "Lapped".
+CLASSIFIED_FINISH_STATUSES = frozenset({"Finished", "Lapped"})
+
+# Eventi amministrativi successivi alla gara: non rappresentano un ritiro
+# avvenuto durante la simulazione e non devono alimentare il rischio DNF.
+POST_RACE_EXCLUSION_STATUSES = frozenset({"Disqualified", "Excluded"})
+
+
+def is_race_dnf(status: str | None) -> bool:
+    """
+    Classifica un DNF all-cause usando esclusivamente lo stato finale.
+
+    Qualsiasi stato valorizzato che non rappresenti un arrivo classificato o
+    un'esclusione amministrativa viene trattato come DNF. In questo modo sono
+    inclusi sia incidenti/DNS sia motivazioni tecniche specifiche (per esempio
+    "Brakes"), senza dipendere da una whitelist incompleta.
+    """
+    if status is None or pd.isna(status):
+        return False
+
+    normalized_status = str(status).strip()
+    if not normalized_status:
+        return False
+
+    is_dnf = normalized_status not in CLASSIFIED_FINISH_STATUSES | POST_RACE_EXCLUSION_STATUSES
+    return is_dnf
 
 
 def got_end_penalty(driver_abb: str, race_laps: pd.DataFrame, race_results: pd.DataFrame):
@@ -30,7 +58,15 @@ def get_driver_fastest_quali_time(quali_results_df: pd.DataFrame, driver_id: str
     q3 = quali_results_df.loc[quali_results_df["driver_id"] == driver_id, "Q3"].dt.total_seconds()
 
     times = [q1, q2, q3]
-    return np.nanmin(times)
+    # remove NaN values to avoid nanmin warning
+    times = np.asarray(times, dtype=float)
+    return np.nan if times.size == 0 or np.isnan(times).all() else np.nanmin(times)
+
+
+def get_session_mapping(year: int, is_conventional: bool, race_type: str, data: str):
+    if is_conventional:
+        year = 0
+    return SESSION_MAPPING.get((year, is_conventional, race_type, data), None)
 
 
 def setup_custom_logger(name):

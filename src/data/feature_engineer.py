@@ -2,49 +2,33 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import HuberRegressor
 from src.config import *
-from src.utils import get_driver_fastest_quali_time, setup_custom_logger
+from src.utils import get_driver_fastest_quali_time, setup_custom_logger, is_race_dnf
 
 """
 Possibili features da inserire in futuro (in caso manchino dati)
+In generale evitare di mettere "team features" che ripetano quelle già presenti sul driver
  - Dati sul circuito: elevation height o safety car rate,
  - Average degradation rate, basato sulla history delle gare passate
  - Historical weather: andando a prendere negli ultimi, bho 10 anni, tramite i dati di fast f1, se la gara è stata bagnata; 
     costruire una history a parte che comprenda tutti i circuiti facendo gare_bagnate/tot_gare
+- Strategy wise featues?
 """
 
-# TODO: alcune idee per feature da inserire per il dnf_model
+# Alcune idee per feature da inserire per il dnf_model
 # Inserite tutte nei parquet gold, ma poi quelle che non centrano con il ranking le escluderei
 # e terrei solo per per trainare il dnf regressor
-# Magari fare anche ricerca online per capire se esistono già modelli simili
+# TODO: creare alcune feature semplici per il dnf model
+# andare a prendere il logistic regressor ottimizzato e dargli un numero maggiore di feature
+# per vedere se porta a miglioramenti nel simulator, altrimenti bho
+# mi sa che lo tengo solo come dato separato, senza passarlo al montecarlo
 """ 
-DNF tecnico
-Feature promettenti e disponibili prima della gara:
-DNF tecnici del team nelle ultime 5/10 gare;
-tasso DNF con decadimento temporale;
-numero di gare consecutive senza guasti;
-età/chilometraggio di motore, cambio, turbo e componenti ibridi;
-sostituzioni di componenti nel weekend;
-penalità in griglia dovute a sostituzioni;
-problemi tecnici osservati nelle prove libere;
-guasti recenti della vettura del compagno;
-temperatura prevista;
-altitudine;
-lunghezza della gara;
-stress del circuito su motore, cambio e freni;
-nuova regulation era o aggiornamento importante della vettura.
-
-DNF per incidente
-incidenti del pilota nelle ultime 5/10 gare;
-incident rate al primo giro;
-posizioni perse/guadagnate mediamente al primo giro;
-esperienza del pilota;
-probabilità di pioggia;
-circuito cittadino;
-difficoltà di sorpasso;
-posizione in griglia;
-densità della zona di partenza;
-storico di incidenti e Safety Car del circuito;
-affinità del pilota sul bagnato.
+DNF features esclusive, da combinare con altre già presenti tra le classiche
+ - numero di gare consecutive senza guasti;
+ - problemi tecnici osservati nelle prove libere;
+ - temperatura prevista e/o altitudine;
+ - stress del circuito sulla macchina: mediastorica di ritiri sul circuito;
+ - incident rate al primo giro;
+ - storico di incidenti e Safety Car del circuito;
 """
 
 log = setup_custom_logger("DataLoader")
@@ -82,9 +66,7 @@ class FeatureEngineering:
 
         return float(degradation_rate)
 
-    def compute_race_pace(
-        self, long_run_laps: pd.DataFrame, abbreviation: str, min_valid_laps: int = MIN_VALID_LAPS
-    ) -> float:
+    def compute_race_pace(self, long_run_laps: pd.DataFrame, abbreviation: str, min_valid_laps: int = MIN_VALID_LAPS):
         """
         Il delta rappresenta il gap (in secondi) dal
         Mediano dei tempi del long run, a cui sottraggo il tempo del leader (giro più veloce tra i long run di tutti)
@@ -94,11 +76,53 @@ class FeatureEngineering:
             return np.nan
         driver_laps = long_run_laps[long_run_laps["Driver"] == abbreviation]
         if len(driver_laps) < min_valid_laps:
+            # self.log.warning(f"Not enough laps for driver {abbreviation} to compute race pace")
             return np.nan
 
         leader_time = long_run_laps["LapTime"].min()
         deltas = driver_laps["LapTime"] - leader_time
-        return float(deltas.median())
+        return float(np.mean(deltas))
+
+    def compute_team_race_pace(self, long_run_laps: pd.DataFrame, team: str):
+        team_laps = long_run_laps[long_run_laps["Team"] == team]
+        if team_laps.empty:
+            # self.log.warning(f"No laps found for team {team} in long run laps")
+            return np.nan
+
+        drivers = team_laps["Driver"].dropna().unique()
+        deltas = []
+        for driver in drivers:
+            delta = self.compute_race_pace(long_run_laps, driver)
+            if not np.isnan(delta):
+                deltas.append(delta)
+
+        return float(np.mean(deltas)) if deltas else np.nan
+
+    def compute_late_stint_dropoff(self, long_run_laps: pd.DataFrame, abbreviation: str, min_valid_laps: int = 8):
+        """
+        Secondi persi nel finale rispetto al trend osservato nella prima
+        parte dello stint. Positivo = calo finale.
+        Mean valid laps di almeno 8 (più alto rispetto alle altre features) perchè c'è uno split da fare qui
+        """
+        driver_laps = long_run_laps[long_run_laps["Driver"] == abbreviation]
+
+        if len(driver_laps) < min_valid_laps:
+            return np.nan
+
+        x = np.arange(len(driver_laps), dtype=float)
+        y = driver_laps["LapTime"].to_numpy(dtype=float)
+
+        split = max(int(len(driver_laps) * 0.7), min_valid_laps - 2)
+        if len(driver_laps) - split < 2:
+            return np.nan
+
+        model = HuberRegressor(epsilon=1.35, max_iter=1000)
+        model.fit(x[:split].reshape(-1, 1), y[:split])
+
+        expected_late = model.predict(x[split:].reshape(-1, 1))
+        late_residuals = y[split:] - expected_late
+
+        return float(np.median(late_residuals))
 
     def compute_quali_pace(self, quali_results_df: pd.DataFrame, driver_id: str):
         """
@@ -113,9 +137,9 @@ class FeatureEngineering:
         """Compute the difference between the two teammates for each feature in the list."""
         teammate_features = {
             "degradation_rate": "deg",
-            "simulated_race_pace": "pace",
+            "mean_race_pace": "pace",
             "quali_pace": "quali",
-            "race_current_form": "race_form",
+            "driver_current_form": "race_form",
             "avg_positions_gained": "pos_gained",
             "lap1_avg_pos_gained": "lap1_pos_gained",
             "wet_affinity": "wet_affinity",
@@ -147,16 +171,20 @@ class FeatureEngineering:
                 # if feature != "quali_pace":
                 gold_df.loc[gold_df["driver_id"] == driver_a, f"{feature}"] = driver_b_feature
                 gold_df.loc[gold_df["driver_id"] == driver_a, f"teammate_delta_{teammate_f}"] = np.nan
-                gold_df.loc[gold_df["driver_id"] == driver_b, f"teammate_delta_{teammate_f}"] = 0.0
+                gold_df.loc[gold_df["driver_id"] == driver_b, f"teammate_delta_{teammate_f}"] = np.nan
             elif b_nan:
                 # if feature != "quali_pace":
                 gold_df.loc[gold_df["driver_id"] == driver_b, f"{feature}"] = driver_a_feature
-                gold_df.loc[gold_df["driver_id"] == driver_a, f"teammate_delta_{teammate_f}"] = 0.0
+                gold_df.loc[gold_df["driver_id"] == driver_a, f"teammate_delta_{teammate_f}"] = np.nan
                 gold_df.loc[gold_df["driver_id"] == driver_b, f"teammate_delta_{teammate_f}"] = np.nan
             else:
                 delta = driver_a_feature - driver_b_feature
                 gold_df.loc[gold_df["driver_id"] == driver_a, f"teammate_delta_{teammate_f}"] = delta
                 gold_df.loc[gold_df["driver_id"] == driver_b, f"teammate_delta_{teammate_f}"] = -delta
+
+    def get_practice_position(self, practice_ranking: pd.DataFrame, abbreviation: str) -> float:
+        matches = practice_ranking.index[practice_ranking["Driver"] == abbreviation]
+        return float(matches[0] + 1) if len(matches) else np.nan
 
     def get_grid_position(self, race_results_df: pd.DataFrame, driver_id: str) -> float:
         grid_position = race_results_df.loc[race_results_df["driver_id"] == driver_id, "GridPosition"].iloc[0]
@@ -167,19 +195,30 @@ class FeatureEngineering:
 
         return grid_position
 
-    def compute_rolling_dnf_rate(
-        self, history_before: pd.DataFrame, team_id: str, window: int = ROLLING_DNF_WINDOW
-    ) -> float:
-        team_history = history_before.loc[history_before["team_id"] == team_id].tail(window * 2).copy()
+    def compute_team_dnf_rate(
+        self, history_before: pd.DataFrame, year: int, team_id: str, window: int = ROLLING_DNF_WINDOW * 2
+    ):
+        """DNF meaning any kind of it during the race"""
+        team_history = history_before.loc[(history_before["year"] == year) & (history_before["team_id"] == team_id)]
         if team_history.empty:
             return np.nan
 
-        is_dns = team_history["status_raw"] == "Did not start"
-        is_retired = team_history["status_raw"] == "Retired"
-        is_first_lap_crash = is_retired & (team_history["laps_completed"] <= 1)
-        is_dnf = is_dns | (is_retired & ~is_first_lap_crash)
-        # rate = is_dnf.mean()
-        rate = is_dnf.ewm(span=window * 2).mean().iloc[-1]
+        is_dnf = team_history["status_raw"].map(is_race_dnf)
+        rate = is_dnf.ewm(span=window).mean().iloc[-1]
+        return float(rate)
+
+    def compute_driver_dnf_rate(
+        self, history_before: pd.DataFrame, year: int, driver_id: str, window: int = ROLLING_DNF_WINDOW
+    ):
+        """DNF meaning any kind of it during the race"""
+        driver_history = history_before.loc[
+            (history_before["year"] == year) & (history_before["driver_id"] == driver_id)
+        ]
+        if driver_history.empty:
+            return np.nan
+
+        is_dnf = driver_history["status_raw"].map(is_race_dnf)
+        rate = is_dnf.ewm(span=window).mean().iloc[-1]
         return float(rate)
 
     def compute_car_age_proxy(
@@ -219,7 +258,7 @@ class FeatureEngineering:
 
         return float(cumulative_laps)
 
-    def compute_track_affinity(self, history_before: pd.DataFrame, driver_id: str, circuit_id: str) -> float:
+    def compute_driver_track_affinity(self, history_before: pd.DataFrame, driver_id: str, circuit_id: str) -> float:
         """Driver's average position at this circuit in past seasons."""
         driver_history = history_before[history_before["driver_id"] == driver_id]
         if driver_history.empty:
@@ -235,11 +274,27 @@ class FeatureEngineering:
         # Positive means the driver is worse at that track than average
         return float(circuit_avg - career_avg)
 
-    def compute_race_current_form(self, history_before: pd.DataFrame, driver_id: str, races: int = CURRENT_FORM_RACES):
+    def compute_team_track_affinity(self, history_before: pd.DataFrame, team_id: str, circuit_id: str) -> float:
+        """Team's average position at this circuit in past seasons."""
+        team_history = history_before[history_before["team_id"] == team_id]
+        if team_history.empty:
+            return np.nan
+
+        career_avg = team_history["race_position"].mean()
+        circuit_avg = team_history.loc[team_history["circuit_id"] == circuit_id, "race_position"].mean()
+
+        if np.isnan(career_avg) or np.isnan(circuit_avg):
+            return np.nan
+
+        return float(circuit_avg - career_avg)
+
+    def compute_driver_current_form(
+        self, history_before: pd.DataFrame, driver_id: str, races: int = CURRENT_FORM_RACES
+    ):
         driver_history = history_before[history_before["driver_id"] == driver_id]
         if driver_history.empty:
             return np.nan
-        # recent_form = driver_history.sort_values("race_date")["race_position"].tail(races).mean()
+
         recent_form = (
             driver_history.sort_values("race_date")["race_position"].tail(races).ewm(span=races).mean().iloc[-1]
         )
@@ -249,7 +304,7 @@ class FeatureEngineering:
         driver_history = history_before[history_before["driver_id"] == driver_id]
         if driver_history.empty:
             return np.nan
-        # recent_form = driver_history.sort_values("race_date")["quali_position"].tail(races).mean()
+
         recent_form = (
             driver_history.sort_values("race_date")["quali_position"].tail(races).ewm(span=races).mean().iloc[-1]
         )
@@ -387,8 +442,8 @@ class FeatureEngineering:
         self, history_before: pd.DataFrame, team_id: str, year: int, min_races: int = MIN_DEV_RACES
     ):
         """
-        Trend di sviluppo del team, calcolato sulla pendenza del 'quali_time'
-        nel corso della stagione.
+        Trend di sviluppo del team, calcolato sulla pendenza del gap
+        percentuale di 'quali_time' nel corso della stagione.
 
         Aggregazione: per ogni GP si prende il minimo (il piu' veloce) tra i
         due piloti del team, per isolare il potenziale della vettura da un
@@ -399,30 +454,88 @@ class FeatureEngineering:
         scambiare un reset di telaio invernale per una regressione di sviluppo
         -- stessa logica di car_age_proxy/regulation_era.
 
-        Segno: la pendenza grezza (delta vs indice gara) e' negativa se il team
-        migliora (delta che si riduce). Restituiamo -slope: un valore POSITIVO
-        indica sviluppo positivo (macchina che diventa piu' veloce). Verifica
-        che questa convenzione ti torni comoda rispetto alle altre feature.
+        Il gap viene normalizzato rispetto al miglior tempo di ogni gara prima
+        di calcolare il trend, così da confrontare circuiti con tempi sul giro
+        diversi.
+
+        Segno: la pendenza grezza (gap percentuale vs indice gara) e' negativa
+        se il team migliora. Restituiamo -slope: un valore POSITIVO indica
+        sviluppo positivo (macchina che diventa piu' veloce).
         """
-        team_history = history_before[(history_before["team_id"] == team_id) & (history_before["year"] == year)]
+        team_history = history_before[(history_before["team_id"] == team_id)]
         if team_history.empty:
             return np.nan
 
         per_race = team_history.groupby("race_date")["quali_time"].min().sort_index()
-        fastest_per_race = (
-            history_before[history_before["year"] == year].groupby("race_date")["quali_time"].min().sort_index()
-        )
-        delta = (per_race - fastest_per_race).dropna()  # allinea per indice, poi dropna
-        if len(delta) < min_races:
-            return np.nan  # troppo pochi punti in stagione, il trend sarebbe rumore
+        fastest_per_race = history_before.groupby("race_date")["quali_time"].min().sort_index()
+        delta_pct = (per_race - fastest_per_race).dropna()
+        if len(delta_pct) < min_races:
+            return np.nan  # troppe poche gare in stagione, il trend sarebbe rumore
 
-        X = np.arange(len(delta)).reshape(-1, 1)
-        y = delta.values
+        X = np.arange(len(delta_pct)).reshape(-1, 1)
+        y = delta_pct.values
 
         model = HuberRegressor(epsilon=1.35, max_iter=1000)
         model.fit(X, y)
 
         return float(-model.coef_[0])
+
+    def compute_team_pit_execution_index(
+        self, history_before: pd.DataFrame, team_id: str, races: int = CONSISTENCY_WINDOW
+    ) -> float:
+        """
+        Rolling median of the team's within-race pit-duration z-score.
+
+        Lower values mean less total time spent traversing the pit lane relative
+        to the field. Jolpica does not isolate stationary wheel-change time.
+        """
+        team_history = history_before.loc[history_before["team_id"] == team_id, ["race_date", "pit_execution_zscore"]]
+        if team_history.empty:
+            return np.nan
+
+        per_race = team_history.groupby("race_date")["pit_execution_zscore"].median().dropna().sort_index().tail(races)
+        if per_race.empty:
+            return np.nan
+        # we return median since is more robust to outliers than mean
+        return float(per_race.median())
+
+    def compute_team_strategy_aggressiveness_score(
+        self, history_before: pd.DataFrame, team_id: str, races: int = CONSISTENCY_WINDOW
+    ) -> float:
+        """
+        Rolling mean of how early the team makes its first stop versus the field.
+
+        Negative values mean earlier, more aggressive stops. Only historical
+        races are present in ``history_before``, so the feature is causal.
+        """
+        team_history = history_before.loc[history_before["team_id"] == team_id, ["race_date", "first_stop_lap_zscore"]]
+        if team_history.empty:
+            return np.nan
+
+        per_race = team_history.groupby("race_date")["first_stop_lap_zscore"].median().dropna().sort_index().tail(races)
+        if per_race.empty:
+            return np.nan
+        score = per_race.ewm(span=races, adjust=False).mean().iloc[-1]
+        return float(score)
+
+    def compute_recent_race_pace(
+        self, history_before: pd.DataFrame, year: int, driver_id: str, races: int = CURRENT_FORM_RACES
+    ):
+        """EWMA of the driver's percentage pace gap in recent races. Lower is better."""
+        driver_history = history_before.loc[
+            (history_before["driver_id"] == driver_id), ["race_date", "race_pace"]
+        ].sort_values("race_date")
+        if driver_history.empty:
+            return np.nan
+
+        per_race_leader = history_before.groupby("race_date")["race_pace"].min()
+        leader_pace = driver_history["race_date"].map(per_race_leader)
+        delta_pct = (driver_history["race_pace"] - leader_pace).dropna()
+        if delta_pct.empty:
+            return np.nan
+
+        recent_pace = delta_pct.tail(races).ewm(span=races).mean().iloc[-1]
+        return float(recent_pace)
 
     def compute_wet_affinity(self, history_before: pd.DataFrame, driver_id: str) -> float:
         """Driver's average position in wet races."""
@@ -430,7 +543,7 @@ class FeatureEngineering:
         if driver_history.empty:
             return np.nan
 
-        # Filter for wet races (you might need to adjust this condition)
+        # Filter for wet races
         wet_races = driver_history[driver_history["rain_probability"] > WET_WEATHER_THRESHOLD]
         if wet_races.empty:
             return np.nan
@@ -452,16 +565,6 @@ class FeatureEngineering:
         )
         rain_probability = weather_df["rain_probability"].iloc[0]
         return float(rain_probability)
-
-    def is_unclassified_dnf(self, status: str) -> bool:
-        """True if the driver did not finish or was DQD, DNS, ecc.
-        and should be excluded from the target, not set to last place"""
-        if status is None:
-            return False  # fallback > no signal
-        if status in ["Retired", "Accident", "Withdrew", "Did not start", "Disqualified"]:
-            return True
-        else:
-            return False
 
     def get_regs_era(self, year: int):
         """Return the regulation era based on the year."""

@@ -1,10 +1,13 @@
 from src.data.gold_layer import GoldLayer
-from src.trainer import *
-from src.model_optimization import *
-from src.data.data_loader import *
-from src.config import TOLLERANCE, to_log
+from src.trainer import DynamicTraining, StaticTraining, select_model_feature_frame
+from src.model_optimization import FIXED_PARAMS, run_hpo_optuna
+from src.data.data_loader import DataLoader, NEW_YEAR, CATEGORICAL_COLS
+from src.config import DEFAULT_DECAY_RATE, to_log
+from src.ranker_features import PRODUCTION_FEATURES
+from src.ranking_metrics import decide_promotion, evaluate_grouped_rankings, race_ranking_metrics
 from ml_flow_auto import launch_mlflow_server, MLFLOW_HOST, MLFLOW_PORT
 import asyncio
+import os
 import fastf1
 import pandas as pd
 import numpy as np
@@ -16,44 +19,37 @@ import hashlib
 
 BASE_MODEL = "pitwall_oracle_base.json"
 LATEST_MODEL = "pitwall_oracle_latest.json"
+PENDING_MODEL = "pitwall_oracle_pending.json"
 FORCE = False
 RUN_HPO = True  # Imposta a True se vuoi rieseguire la ricerca parametri con Optuna
 
 
-def zscore_within_race(values: np.ndarray, eps: float = 1e-8) -> np.ndarray:
-    """
-    Standardizza un vettore all'interno di una singola gara.
-
-    Il risultato ha media circa 0 e deviazione standard circa 1.
-    In caso di vettore costante restituisce zeri.
-    """
-    values = np.asarray(values, dtype=np.float64)
-
-    mean = np.mean(values)
-    std = np.std(values, ddof=0)
-
-    if not np.isfinite(std) or std < eps:
-        return np.zeros_like(values, dtype=np.float64)
-
-    return (values - mean) / std
-
-
 def run_pipeline():
     data_loader = DataLoader()
+    selected_features = PRODUCTION_FEATURES
+    target_train_multiplier = 1.0
 
     # Inizializziamo MLflow Parent Run per l'intero ciclo di addestramento/test
     with mlflow.start_run(run_name=f"F1_Season_Simulation_{NEW_YEAR}") as parent_run:
         mlflow.set_tag("model_type", "ranking")
         mlflow.log_param("simulation_year", NEW_YEAR)
+        mlflow.log_param("ranker_feature_count", len(selected_features))
+        mlflow.log_param("ranker_primary_metric", "mean_race_pairwise_accuracy")
 
         # ----------------- PHASE 1: STATIC TRAINING & HPO -----------------
-        trainer_static = StaticTraining(data_loader)
+        trainer_static = StaticTraining(
+            data_loader,
+            feature_names=selected_features,
+            target_year=NEW_YEAR,
+            target_train_multiplier=target_train_multiplier,
+        )
         trainer_static.log.info("Inizio pipeline training")
         asyncio.run(trainer_static.prepare_data(force=FORCE))
         mlflow.log_params(to_log)
 
         # Default
         best_params = {**FIXED_PARAMS, "learning_rate": 0.05, "max_depth": 4, "n_estimators": 200}
+        decay_rate = DEFAULT_DECAY_RATE
 
         if RUN_HPO:
             trainer_static.log.info("Avvio HPO con Optuna per il modello statico...")
@@ -71,32 +67,41 @@ def run_pipeline():
         def dataset_hash(df: pd.DataFrame) -> str:
             return hashlib.sha256(pd.util.hash_pandas_object(df, index=True).values).hexdigest()
 
-        ranking_columns = trainer_static.train_df.drop(columns=TO_DROP, errors="ignore")
+        ranking_columns = trainer_static.feature_frame(trainer_static.train_df)
         mlflow.log_param("train_dataset_hash", dataset_hash(ranking_columns))
 
         # Salvataggio e logging del modello base
         trainer_static.save_artifacts(BASE_MODEL)
         mlflow.log_artifact(str(os.path.join(trainer_static.model_dir, BASE_MODEL)), artifact_path="models")
 
-        # Preparazione del test set fisso (usato solo per static)
+        # Scorecard sul test statico, sempre aggregata gara per gara.
         trainer_static.test_df = trainer_static.test_df.sort_values("race_date").reset_index(drop=True)
         trainer_static.test_df["qid"] = pd.factorize(trainer_static.test_df["race_date"])[0]
-        X_test_fixed = trainer_static.test_df.drop(TO_DROP + ["qid"], axis=1)
-        y_test_fixed = trainer_static.test_df["target"]
-        test_group_sizes = trainer_static.test_df["qid"].value_counts().sort_index().to_numpy()
-        # Calcolo metriche di partenza
-        initial_ndcg = compute_ndcg(
-            y_test_fixed.to_numpy(), base_model.predict(X_test_fixed), group_sizes=test_group_sizes
-        )
-        mlflow.log_metric("static_baseline_ndcg", initial_ndcg)
+        X_test_fixed = trainer_static.feature_frame(trainer_static.test_df)
+        static_metrics = evaluate_grouped_rankings(trainer_static.test_df, base_model.predict(X_test_fixed))
+        for metric in (
+            "pairwise_accuracy",
+            "teammate_pairwise_accuracy",
+            "position_mae",
+            "ndcg_full",
+            "ndcg_at_5",
+            "ndcg_at_10",
+            "top_3_overlap",
+            "top_5_overlap",
+        ):
+            mlflow.log_metric(f"static_{metric}", float(static_metrics[metric].mean()))
 
         # ----------------- PHASE 2: DYNAMIC PREQUENTIAL TESTING -----------------
-        trainer_dynamic = DynamicTraining(data_loader)
+        trainer_dynamic = DynamicTraining(
+            data_loader,
+            feature_names=selected_features,
+            target_year=NEW_YEAR,
+            target_train_multiplier=target_train_multiplier,
+        )
         # Forziamo i parametri ottimali anche sul trainer dinamico per i futuri challenger
         trainer_dynamic.ranker_params = best_params
         trainer_dynamic.decay_rate = decay_rate
 
-        tracker = PrequentialTracker()
         gold = GoldLayer()
         champion_path = trainer_dynamic.model_dir / BASE_MODEL
 
@@ -105,11 +110,8 @@ def run_pipeline():
 
         trainer_dynamic.log.info("Inizio testing su gare dinamiche...")
         challenger = None
-        # Metrics setup
-        oos_relative_residuals: list[np.ndarray] = []
-        race_score_spreads: list[float] = []
-        duel_history = []  # cronologia duelli per regression moving average
-        recent_ndcgs = []  # saving ndcgs to compute perquential moving average
+        duel_history: list[dict[str, float]] = []
+        champion_history: list[dict[str, float]] = []
         for idx, date in enumerate(races):
             race_idx = idx + 1
             trainer_dynamic.log.info(f"Elaborazione gara del {date.date()}")
@@ -132,87 +134,54 @@ def run_pipeline():
 
             # Target encoding dinamico senza leakage
             cutoff_date = race_df["race_date"].iloc[0]
-            for col in categorical_cols:
+            for col in CATEGORICAL_COLS:
                 race_df[col] = data_loader.apply_target_encoding(race_df, col, cutoff_date=cutoff_date)
             race_df["circuit_id"] = race_df["circuit_id"].astype(data_loader.circuit_dtype)
 
             # Predizione sul GP in corso con il Champion attuale
-            X_new = race_df.drop(TO_DROP, axis=1)
-            scores_champion = champion_model.predict(X_new)
+            X_new_champion = select_model_feature_frame(champion_model, race_df)
+            scores_champion = champion_model.predict(X_new_champion)
 
-            # Valutazione della precision:
-            precision3 = compute_precision_at_k(race_df["target"].to_numpy(), scores_champion, k=3)
-            precision5 = compute_precision_at_k(race_df["target"].to_numpy(), scores_champion, k=5)
-
-            mlflow.log_metric("precision_at_3", precision3, step=race_idx)
-            mlflow.log_metric("precision_at_5", precision5, step=race_idx)
-
-            # Valutazione performance prequenziale (Out-of-sample)
-            ndcg_prequential = compute_ndcg(race_df["target"].to_numpy(), scores_champion)
-            tracker.log((NEW_YEAR, race_idx), ndcg_prequential)
-
-            # Loggiamo la telemetria di gara su MLflow usando l'indice progressivo come step
-            recent_ndcgs.append(ndcg_prequential)
-            recent_ndcgs = recent_ndcgs[-5:]
-            moving_avg = np.mean(recent_ndcgs)
-            mlflow.log_metric("moving_avg_ndcg", moving_avg, step=race_idx)
-            mlflow.log_metric("prequential_ndcg", ndcg_prequential, step=race_idx)
-            mlflow.log_metric("cumulative_mean_ndcg", tracker.cumulative_mean(), step=race_idx)
-
-            trainer_dynamic.log.info(
-                f"[{NEW_YEAR}_{race_idx}] NDCG prequenziale: {ndcg_prequential:.4f} | "
-                f"media cumulativa: {tracker.cumulative_mean():.4f}"
+            champion_metrics = race_ranking_metrics(
+                race_df["target"].to_numpy(), scores_champion, race_df["raw_team_id"].to_numpy()
             )
-
-            # Calibrazione del sigma relativo per Monte Carlo
-            target_values = race_df["target"].to_numpy(dtype=np.float64)
-
-            standardized_scores = zscore_within_race(scores_champion)
-            standardized_targets = zscore_within_race(target_values)
-
-            relative_residuals = standardized_scores - standardized_targets
-
-            oos_relative_residuals.append(relative_residuals)
-
-            score_spread = float(np.std(scores_champion, ddof=0))
-            race_score_spreads.append(score_spread)
-
-            race_sigma_relative = float(np.std(relative_residuals, ddof=0))
-            cumulative_relative_residuals = np.concatenate(oos_relative_residuals)
-            cumulative_sigma_relative = float(np.std(cumulative_relative_residuals, ddof=0))
-
-            mlflow.log_metric("race_sigma_relativo", race_sigma_relative, step=race_idx)
-            mlflow.log_metric("cumulative_sigma_relativo", cumulative_sigma_relative, step=race_idx)
-            mlflow.log_metric("race_score_std", score_spread, step=race_idx)
+            champion_history.append(champion_metrics)
+            for metric, value in champion_metrics.items():
+                mlflow.log_metric(f"champion_{metric}", value, step=race_idx)
+                mlflow.log_metric(
+                    f"champion_moving_avg_{metric}",
+                    float(np.mean([row[metric] for row in champion_history[-5:]])),
+                    step=race_idx,
+                )
 
             trainer_dynamic.log.info(
-                f"[{NEW_YEAR}_{race_idx}] "
-                f"sigma relativo={race_sigma_relative:.4f} | "
-                f"sigma relativo cumulativo={cumulative_sigma_relative:.4f} | "
-                f"score std={score_spread:.4f}"
+                f"[{NEW_YEAR}_{race_idx}] pairwise={champion_metrics['pairwise_accuracy']:.4f} | "
+                f"teammate={champion_metrics['teammate_pairwise_accuracy']:.4f} | "
+                f"position_mae={champion_metrics['position_mae']:.3f}"
             )
 
             if challenger is not None:
-                # Confronto Champion vs Challenger su dataset di test fisso (Shadow Test)
-                scores_challenger = challenger.predict(X_new)
-                ndcg_champion_new = compute_ndcg(race_df["target"].to_numpy(), scores_champion)
-                ndcg_challenger_new = compute_ndcg(race_df["target"].to_numpy(), scores_challenger)
-                delta_ndcg = ndcg_challenger_new - ndcg_champion_new
-                # Log del duello su MLflow
-                mlflow.log_metric("delta_ndcg", delta_ndcg, step=race_idx)
+                # Confronto appaiato Champion vs Challenger sullo stesso GP OOS.
+                X_new_challenger = select_model_feature_frame(challenger, race_df)
+                scores_challenger = challenger.predict(X_new_challenger)
+                challenger_metrics = race_ranking_metrics(
+                    race_df["target"].to_numpy(), scores_challenger, race_df["raw_team_id"].to_numpy()
+                )
+                duel_row = {
+                    **{f"champion_{metric}": value for metric, value in champion_metrics.items()},
+                    **{f"challenger_{metric}": value for metric, value in challenger_metrics.items()},
+                }
+                duel_history.append(duel_row)
+                for metric in champion_metrics:
+                    mlflow.log_metric(
+                        f"delta_{metric}", challenger_metrics[metric] - champion_metrics[metric], step=race_idx
+                    )
 
                 assert champion_model is not challenger  # guardia esplicita, non deve mai fallire ora
-                # Reduce noise
-                duel_history.append((ndcg_champion_new, ndcg_challenger_new))
-                k = max(3, race_idx)
-                duel_history = duel_history[-k:]
-
-                mean_champ = np.mean([c for c, _ in duel_history])
-                mean_chall = np.mean([ch for _, ch in duel_history])
-                regressed = mean_chall < mean_champ - TOLLERANCE
+                decision = decide_promotion(pd.DataFrame(duel_history))
 
                 # Decisione muretto box: Promozione o Rifiuto
-                if not regressed:
+                if decision.promote:
                     new_filename = f"pitwall_oracle_{NEW_YEAR}_{race_idx}.json"
                     trainer_dynamic.save_artifacts(new_filename)
 
@@ -224,14 +193,19 @@ def run_pipeline():
                     mlflow.log_metric("challenger_promoted", 1.0, step=race_idx)
 
                     trainer_dynamic.log.info(
-                        f"[{NEW_YEAR}_{race_idx}] Challenger promosso! "
-                        f"Champ: {ndcg_champion_new:.4f} vs Chall: {ndcg_challenger_new:.4f}"
+                        f"[{NEW_YEAR}_{race_idx}] Challenger promosso: {decision.reason} | "
+                        f"delta_pairwise={decision.mean_delta_pairwise:+.4f} | "
+                        f"delta_teammate={decision.mean_delta_teammate:+.4f} | "
+                        f"delta_mae={decision.mean_delta_position_mae:+.3f}"
                     )
+                    duel_history.clear()
                 else:
                     mlflow.log_metric("challenger_promoted", 0.0, step=race_idx)
                     trainer_dynamic.log.info(
-                        f"[{NEW_YEAR}_{race_idx}] Challenger RIFIUTATO per regressione. "
-                        f"Champ: {ndcg_champion_new:.4f} vs Chall: {ndcg_challenger_new:.4f}"
+                        f"[{NEW_YEAR}_{race_idx}] Challenger rifiutato: {decision.reason} | "
+                        f"delta_pairwise={decision.mean_delta_pairwise:+.4f} | "
+                        f"delta_teammate={decision.mean_delta_teammate:+.4f} | "
+                        f"delta_mae={decision.mean_delta_position_mae:+.3f}"
                     )
 
             # Addestramento del Challenger con i dati aggiornati fino alla gara corrente (per prossima iter)
@@ -239,32 +213,16 @@ def run_pipeline():
             # Istanziamo il challenger applicando i parametri ottimali trovati da Optuna
             trainer_dynamic.ranker = XGBRanker(**best_params)
             challenger = trainer_dynamic.train()
+            trainer_dynamic.save_artifacts(PENDING_MODEL)
 
-        # Salva e pubblica il modello più recente, addestrato fino all'ultima gara disponibile.
-        trainer_dynamic.save_artifacts(LATEST_MODEL)
-        mlflow.log_artifact(str(os.path.join(trainer_static.model_dir, LATEST_MODEL)), artifact_path="models")
-        # Calcolo finale delle metriche residue (Fattore sigma empirico per Monte Carlo)
-        if not oos_relative_residuals:
-            raise RuntimeError("Impossibile calibrare il sigma: nessun residuo " "out-of-sample è stato raccolto.")
-
-        all_relative_residuals = np.concatenate(oos_relative_residuals)
-
-        sigma_relativo_empirico = float(np.std(all_relative_residuals, ddof=0))
-
-        mean_score_spread = float(np.mean(race_score_spreads))
-        median_score_spread = float(np.median(race_score_spreads))
-
-        mlflow.log_metric("final_sigma_relativo_empirico", sigma_relativo_empirico)
-        mlflow.log_metric("calibration_mean_score_std", mean_score_spread)
-        mlflow.log_metric("calibration_median_score_std", median_score_spread)
-        mlflow.log_param("sigma_calibration_method", "within_race_zscore_oos_residual_std")
-
-        trainer_dynamic.log.info(
-            "Calibrazione Monte Carlo completata. "
-            f"Sigma relativo empirico: {sigma_relativo_empirico:.4f} | "
-            f"score std medio: {mean_score_spread:.4f} | "
-            f"score std mediano: {median_score_spread:.4f}"
-        )
+        # Pubblica esclusivamente il champion già promosso. Il modello allenato
+        # dopo l'ultimo GP resta pending fino alla prossima gara out-of-sample.
+        published_champion = XGBRanker()
+        published_champion.load_model(champion_path)
+        latest_path = trainer_dynamic.model_dir / LATEST_MODEL
+        published_champion.save_model(latest_path)
+        mlflow.log_artifact(str(latest_path), artifact_path="models")
+        trainer_dynamic.log.info(f"Champion pubblicato in {latest_path}")
 
 
 if __name__ == "__main__":

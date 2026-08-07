@@ -98,7 +98,7 @@ class SilverLayer:
         """
         Returns a cleaned version of the results data for a given year, race number and session.
 
-        Required columns in the raw data: 'Position', 'Abbreviation', 'Points', 'Status', 'Laps'.
+        Required columns in the raw data: 'Position', 'Abbreviation', 'Status', 'Laps'.
         """
         assert (session >= 1) & (session <= 5), "Session number not valid: 1 <= session <= 5"
 
@@ -122,13 +122,9 @@ class SilverLayer:
             # TODO: handle if necessary
             # corrections for 2023 or before not supported (hard to distinguish sprint weekend from normal)
             if (session == 5 or session == 3) and year >= 2024:  # race or sprint race
-                if df["Points"].empty or df["Laps"].empty or df["Status"].empty:
-                    self.log.error("Points, Laps or Status column is empty")
-                    raise ValueError("Points, Laps or Status column is empty")
-                    # Solve issues with columns Points, Laps, Status
-                    # TODO: map position to points to write Points column
-                    # TODO: find a way to know how many laps a driver has completed
-                    # That info could also help write the Status column
+                if df["Laps"].empty or df["Status"].empty:
+                    self.log.error("Laps or Status column is empty")
+                    raise ValueError("Laps or Status column is empty")
 
                 # Solve issues with NaN values in Laps column
                 if df["Laps"].isnull().any().any():
@@ -162,6 +158,55 @@ class SilverLayer:
             )
             df["team_id"] = df["TeamName"].map(map_team_id)
             df.to_parquet(self.data_dir / filename)
+        return df
+
+    def get_clean_pit_stops(
+        self, year: int, race_number: int, race_results: pd.DataFrame | None = None, force: bool = False
+    ) -> pd.DataFrame:
+        """Parse Jolpica pit stops and attach the project's driver/team identifiers."""
+        filename = f"{year}_{race_number}_clean_pit_stops.parquet"
+        path = self.data_dir / filename
+        if path.exists() and not force:
+            cached = pd.read_parquet(path)
+            if {"driver_id", "team_id"}.issubset(cached.columns):
+                return cached
+
+        # Load pit stops data
+        raw_df = self.bronze.get_raw_pit_stops(year, race_number)
+        columns = ["driver_id", "team_id", "lap", "stop", "time", "duration_seconds"]
+        if raw_df.empty:
+            df = pd.DataFrame(columns=columns)
+            df.to_parquet(path, index=False)
+            self.log.warning(f"Empty pit stop dataFrame saved to {path}")
+            return df
+        if race_results.empty:
+            self.log.error("Race results is empty")
+            raise ValueError("Race results is empty")
+
+        required_columns = {"driverId", "lap", "stop", "duration"}
+        missing_columns = required_columns.difference(raw_df.columns)
+        if missing_columns:
+            self.log.error(f"Colonne pit stop mancanti: {sorted(missing_columns)}")
+            raise ValueError(f"Colonne pit stop mancanti: {sorted(missing_columns)}")
+
+        # Data cleaning
+        df = raw_df.rename(columns={"driverId": "DriverId"}).copy()
+        df["lap"] = pd.to_numeric(df["lap"], errors="coerce")
+        df["stop"] = pd.to_numeric(df["stop"], errors="coerce")
+        df["duration_seconds"] = pd.to_timedelta(df["duration"], errors="coerce").dt.total_seconds()
+        # Join with race results to assign driver_id and team_id
+        identities = race_results.loc[:, ["DriverId", "driver_id", "team_id"]].drop_duplicates("DriverId")
+        df = df.merge(identities, on="DriverId", how="inner", validate="many_to_one")
+        df = (
+            df.dropna(subset=["driver_id", "team_id", "lap", "stop", "duration_seconds"])
+            .loc[lambda frame: (frame["lap"] > 0) & (frame["stop"] > 0) & (frame["duration_seconds"] > 0)]
+            .drop_duplicates(subset=["driver_id", "stop"])
+            .sort_values(["driver_id", "stop"])
+        )
+        df["lap"] = df["lap"].astype(int)
+        df["stop"] = df["stop"].astype(int)
+        df = df.reindex(columns=columns).reset_index(drop=True)
+        df.to_parquet(path, index=False)
         return df
 
     def get_clean_event_metadata(self, year: int, race_number: int, force: bool):

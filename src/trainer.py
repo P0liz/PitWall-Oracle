@@ -3,11 +3,11 @@ import numpy as np
 from xgboost import XGBRanker
 from src.data.data_loader import DataLoader
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from src.utils import setup_custom_logger
-from .config import GLOBAL_SEED, DEFAULT_DECAY_RATE
-
-TO_DROP = ["target", "technical_dnf_target", "race_number", "race_date"]
+from .config import GLOBAL_SEED, DEFAULT_DECAY_RATE, NEW_YEAR
+from .ranker_features import PRODUCTION_FEATURES
 
 
 def make_weights(race_dates: pd.Series, decay_rate: float, reference_date: pd.Timestamp) -> np.ndarray:
@@ -15,9 +15,30 @@ def make_weights(race_dates: pd.Series, decay_rate: float, reference_date: pd.Ti
     return np.exp(-decay_rate * days_elapsed)
 
 
+def select_model_feature_frame(model: XGBRanker, frame: pd.DataFrame) -> pd.DataFrame:
+    """Align inference columns and order to the feature names stored by XGBoost."""
+
+    feature_names = model.get_booster().feature_names
+    if not feature_names:
+        raise ValueError("Il modello non espone i nomi delle feature")
+    missing = [feature for feature in feature_names if feature not in frame.columns]
+    if missing:
+        raise ValueError(f"Feature richieste dal modello ma assenti dal dataframe: {missing}")
+    return frame.loc[:, feature_names]
+
+
 class Training:
-    def __init__(self, data_loader: DataLoader):
+    def __init__(
+        self,
+        data_loader: DataLoader,
+        feature_names: Sequence[str] | None = None,
+        target_year: int = NEW_YEAR,
+        target_train_multiplier: float = 1.0,
+    ):
         self.data_loader = data_loader
+        self.feature_names = tuple(feature_names) if feature_names is not None else PRODUCTION_FEATURES
+        self.target_year = target_year
+        self.target_train_multiplier = target_train_multiplier
         self.model_dir = Path("models")
         self.data_dir = "data_files"
         os.makedirs(self.model_dir, exist_ok=True)
@@ -33,10 +54,27 @@ class Training:
             learning_rate=0.05,
             max_depth=4,
             eval_metric="ndcg@20",
+            ndcg_exp_gain=False,
             missing=np.nan,
             early_stopping_rounds=20,
             enable_categorical=True,
         )
+
+    def feature_frame(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Select the explicit production feature set in deterministic order."""
+
+        missing = [feature for feature in self.feature_names if feature not in frame.columns]
+        if missing:
+            raise ValueError(f"Feature configurate ma assenti dal dataframe: {missing}")
+        return frame.loc[:, self.feature_names]
+
+    def group_weights(self, frame: pd.DataFrame, reference_date: pd.Timestamp) -> np.ndarray:
+        """Create one temporal/regime-aware weight per qid."""
+
+        groups = frame.groupby("qid", sort=True).agg(race_date=("race_date", "first"), year=("year", "first"))
+        weights = make_weights(groups["race_date"], self.decay_rate, reference_date)
+        weights[groups["year"].to_numpy() == self.target_year] *= self.target_train_multiplier
+        return weights
 
     def save_artifacts(self, filename: str = "pitwall_oracle_v1.json"):
         """Salva il modello addestrato nel formato nativo di XGBoost."""
@@ -63,8 +101,14 @@ class Training:
 
 
 class StaticTraining(Training):
-    def __init__(self, data_loader: DataLoader):
-        super().__init__(data_loader)
+    def __init__(
+        self,
+        data_loader: DataLoader,
+        feature_names: Sequence[str] | None = None,
+        target_year: int = 2026,
+        target_train_multiplier: float = 1.0,
+    ):
+        super().__init__(data_loader, feature_names, target_year, target_train_multiplier)
         self.train_df = None
         self.test_df = None
         self.decay_rate = DEFAULT_DECAY_RATE
@@ -77,17 +121,16 @@ class StaticTraining(Training):
             learning_rate=0.05,
             max_depth=4,
             eval_metric="ndcg@20",
+            ndcg_exp_gain=False,
             missing=np.nan,
             early_stopping_rounds=20,
             enable_categorical=True,
         )
 
-    async def prepare_data(self, force: bool = False):
+    async def prepare_data(self, is_dynamic: bool = False, force: bool = False):
         """Metodo esplicito: i dati vengono caricati solo quando chiami questo metodo."""
         print("Inizio Ingestion dati F1...")
-        self.train_df, self.test_df = await self.data_loader.load(force=force)
-        self.train_df.to_parquet(Path(self.data_dir) / "train_df.parquet", index=False)
-        self.test_df.to_parquet(Path(self.data_dir) / "test_df.parquet", index=False)
+        self.train_df, self.test_df = await self.data_loader.load_data(is_dynamic=is_dynamic, force=force)
         self.test_df["circuit_id"] = pd.Categorical(
             self.test_df["circuit_id"], categories=self.train_df["circuit_id"].cat.categories
         )
@@ -107,10 +150,10 @@ class StaticTraining(Training):
         self.test_df["qid"] = pd.factorize(self.test_df["race_date"])[0]
 
         reference_date = self.test_df["race_date"].min()  # prima gara del test set
-        weights_tr = make_weights(self.train_df.groupby("qid")["race_date"].first(), self.decay_rate, reference_date)
+        weights_tr = self.group_weights(self.train_df, reference_date)
 
-        X_train = self.train_df.drop(TO_DROP + ["qid"], axis=1)
-        X_test = self.test_df.drop(TO_DROP + ["qid"], axis=1)
+        X_train = self.feature_frame(self.train_df)
+        X_test = self.feature_frame(self.test_df)
         y_train, y_test = self.train_df["target"], self.test_df["target"]
         qid_train, qid_test = self.train_df["qid"], self.test_df["qid"]
 
@@ -138,8 +181,14 @@ class StaticTraining(Training):
 
 
 class DynamicTraining(Training):
-    def __init__(self, data_loader: DataLoader):
-        super().__init__(data_loader)
+    def __init__(
+        self,
+        data_loader: DataLoader,
+        feature_names: Sequence[str] | None = None,
+        target_year: int = 2026,
+        target_train_multiplier: float = 1.0,
+    ):
+        super().__init__(data_loader, feature_names, target_year, target_train_multiplier)
         self.train_df = None
         self.test_df = None
         self.decay_rate = DEFAULT_DECAY_RATE
@@ -150,18 +199,16 @@ class DynamicTraining(Training):
             random_state=GLOBAL_SEED,
             missing=np.nan,
             enable_categorical=True,
+            ndcg_exp_gain=False,
             n_estimators=200,
             learning_rate=0.05,
             max_depth=4,
         )
 
-    async def prepare_data(self, last_date, force: bool = False):
+    async def prepare_data(self, last_date, is_dynamic: bool = True, force: bool = False):
         """Metodo esplicito: i dati vengono caricati solo quando chiami questo metodo."""
         print("Inizio Ingestion dati F1...")
-        self.train_df, self.test_df = await self.data_loader.load(last_date, force=force)
-        self.test_df["circuit_id"] = pd.Categorical(
-            self.test_df["circuit_id"], categories=self.train_df["circuit_id"].cat.categories
-        )
+        self.train_df, self.test_df = await self.data_loader.load_data(last_date, is_dynamic=is_dynamic, force=force)
         print("Dati pronti nel Paddock.")
 
     def train(self):
@@ -173,12 +220,12 @@ class DynamicTraining(Training):
         self.train_df["qid"] = pd.factorize(self.train_df["race_date"])[0]
 
         # 100% dei dati disponibili va nel train set!
-        X_train = self.train_df.drop(TO_DROP + ["qid"], axis=1)
+        X_train = self.feature_frame(self.train_df)
         y_train = self.train_df["target"]
         qid_train = self.train_df["qid"]
 
         reference_date = self.train_df["race_date"].max()
-        weights_tr = make_weights(self.train_df.groupby("qid")["race_date"].first(), self.decay_rate, reference_date)
+        weights_tr = self.group_weights(self.train_df, reference_date)
 
         # Fit pulito senza eval_set. È deterministico e ultra-veloce.
         self.ranker.fit(X_train, y_train, qid=qid_train, sample_weight=weights_tr, verbose=False)
@@ -188,17 +235,3 @@ class DynamicTraining(Training):
         importances = pd.Series(self.ranker.feature_importances_, index=X_train.columns)
         self.log.debug(f"Top Feature Importances:\n{importances.sort_values(ascending=False)}")
         return self.ranker
-
-
-class PrequentialTracker:
-    """Accumula le metriche gara-per-gara, senza mai mischiarle col test fisso 2025."""
-
-    ndcg_scores: list[float] = []
-    race_ids: list[str] = []
-
-    def log(self, race_id, ndcg: float) -> None:
-        self.race_ids.append(race_id)
-        self.ndcg_scores.append(ndcg)
-
-    def cumulative_mean(self) -> float:
-        return float(np.mean(self.ndcg_scores)) if self.ndcg_scores else float("nan")

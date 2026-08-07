@@ -1,20 +1,13 @@
 import fastf1
 import pandas as pd
-from src.utils import setup_custom_logger
+from src.utils import setup_custom_logger, get_session_mapping
 from src.data.gold_layer import GoldLayer
+from src.config import STARTING_YEAR, STATIC_ENDING_YEAR, NEW_YEAR
 import datetime
+from pathlib import Path
 
-categorical_cols = ["driver_id", "team_id"]
-
-STARTING_YEAR = 2024
-STATIC_ENDING_YEAR = 2025
-NEW_YEAR = 2026
+CATEGORICAL_COLS = ["driver_id", "team_id"]
 TEST_SET_DIM = 8
-
-# TODO: rework sprint weekends mapping system
-# don't like the idea of having 10 ifs to decide which case i am
-# have a dictionary with different cases and based on year and weekend type we get the correct sessions mapping
-# same changes to apply to gold_layer
 
 log = setup_custom_logger("DataLoader")
 
@@ -25,64 +18,48 @@ class DataLoader:
         self.history_builder = self.gold.history_builder
         self.log = log
         self.history_df = self.history_builder.get_history()
-        self.circuit_dtype = (
-            pd.CategoricalDtype(
-                categories=sorted(
-                    self.history_df["circuit_id"].unique()
-                ),  # tutti i circuiti conosciuti, non solo quelli in train
-                ordered=False,
-            )
-            if self.history_df is not None
-            else None
-        )
+        self.circuit_dtype = None
+        self._refresh_circuit_dtype(self.history_df)
         self.train_df = None
         self.test_df = None
         self.dnf_df = None
+        self.data_dir = Path("data_files")
+
+    def _refresh_circuit_dtype(self, *dataframes: pd.DataFrame | None) -> None:
+        """Build the categorical dtype from every currently known circuit."""
+        circuit_series = [
+            df["circuit_id"] for df in dataframes if df is not None and not df.empty and "circuit_id" in df.columns
+        ]
+        if not circuit_series:
+            self.circuit_dtype = None
+            return
+
+        categories = sorted(pd.concat(circuit_series, ignore_index=True).dropna().astype(str).unique().tolist())
+        self.circuit_dtype = pd.CategoricalDtype(categories=categories, ordered=False)
 
     # Single access point to the data
-    async def load(self, last_date: datetime = None, force=False):
+    async def load_data(self, last_date: datetime = None, is_dynamic: bool = True, force=False):
+        train_filename = self.data_dir / "train_df.parquet"
+        test_filename = self.data_dir / "test_df.parquet"
+        dnf_filename = self.data_dir / "dnf_df.parquet"
+        if train_filename.exists() and test_filename.exists() and dnf_filename.exists() and not force:
+            self.log.info(f"Loading data from parquet files...")
+            self.train_df = pd.read_parquet(train_filename)
+            self.test_df = pd.read_parquet(test_filename)
+            self.dnf_df = pd.read_parquet(dnf_filename)
+        else:
+            self.log.info(f"Building data from scratch...")
+            self.train_df, self.test_df = await self.build_data(last_date, force)
+            # Store dataframes as parquet for future use
+            self.train_df.to_parquet(self.data_dir / "train_df.parquet", index=False)
+            if not is_dynamic:
+                self.test_df.to_parquet(self.data_dir / "test_df.parquet", index=False)
 
-        pre_schedule = fastf1.get_event_schedule(STARTING_YEAR - 1)
-        pre_n_races = pre_schedule["RoundNumber"].max()
+        return self.train_df, self.test_df
 
+    async def build_data(self, last_date: datetime = None, force=False):
         # 1. Build precedent history
-        # Load races of the year before STARTING_YEAR in the history
-        self.log.info(f"Building history for {STARTING_YEAR - 1} season...")
-        for i in range(1, pre_n_races + 1):
-            self.log.info(f"Building history for round {i} of {STARTING_YEAR - 1} season...")
-            event = self.gold.silver.get_clean_event_metadata(STARTING_YEAR - 1, i, force)
-            location = event["Location"].iloc[0]
-            # Sprint race
-            if event["EventFormat"].iloc[0] != "conventional":
-                self.log.info("Building also sprint race history")
-                sprint_race_session = 4 if STARTING_YEAR - 1 <= 2023 else 3
-                race_date = event[f"Session{sprint_race_session}Date"].iloc[0]
-                quali_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, sprint_race_session - 1, force)
-                race_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, sprint_race_session, force)
-                race_laps = self.gold.silver.get_untouched_laps(STARTING_YEAR - 1, i, sprint_race_session, force)
-                if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
-                    race_date = race_date.tz_convert("UTC").tz_localize(None)
-                self.history_builder.update_history(
-                    STARTING_YEAR - 1,
-                    i,
-                    sprint_race_session,
-                    quali_results,
-                    race_results,
-                    race_laps,
-                    location,
-                    race_date,
-                )
-            # Actual race
-            race_date = event["Session5Date"].iloc[0]
-            quali_session = 2 if (STARTING_YEAR - 1 <= 2023) and (event["EventFormat"].iloc[0] != "conventional") else 4
-            quali_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, quali_session, force)
-            race_results = self.gold.silver.get_clean_results(STARTING_YEAR - 1, i, 5, force)
-            race_laps = self.gold.silver.get_untouched_laps(STARTING_YEAR - 1, i, 5, force)
-            if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
-                race_date = race_date.tz_convert("UTC").tz_localize(None)
-            self.history_builder.update_history(
-                STARTING_YEAR - 1, i, 5, quali_results, race_results, race_laps, location, race_date
-            )
+        self._build_history(STARTING_YEAR - 1, force)
 
         # 2. Separate data and build features for static set
         all_races = []
@@ -93,7 +70,10 @@ class DataLoader:
             self.log.info(f"Building features for {year} season...")
             for i in range(1, n_races + 1):
                 results = self.gold.build_features(year, i, force)
-                is_test = year == STATIC_ENDING_YEAR and i > n_races - TEST_SET_DIM
+                if last_date is not None:  # dynamic training: no need for test set
+                    is_test = False
+                else:  # static training: last year latest races are test set
+                    is_test = year == STATIC_ENDING_YEAR and i > n_races - TEST_SET_DIM
                 for race_df in results:
                     all_races.append(race_df)
                     race_is_test.append(is_test)
@@ -113,40 +93,85 @@ class DataLoader:
         # Encoding is applied for every single race separately,
         # so that there is no leakage between "past" and "future" races
         self.history_df = self.history_builder.get_history()
-        train_parts, test_parts = [], []
+        train_parts, test_parts, dnf_parts = [], [], []
         assert len(all_races) == len(
             race_is_test
         ), f"Mismatch: {len(all_races)} race_df vs {len(race_is_test)} flag is_test"
 
         for race_df, is_test in zip(all_races, race_is_test):
             cutoff_date = race_df["race_date"].iloc[0]
+            # Il modello DNF e la baseline gerarchica devono conservare gli ID
+            # reali dei team: il target encoding è specifico del ranker.
+            dnf_parts.append(race_df.copy())
             encoded = race_df.copy()
-            for col in categorical_cols:
+            for col in CATEGORICAL_COLS:
                 encoded[col] = self.apply_target_encoding(race_df, col, cutoff_date=cutoff_date)
             (test_parts if is_test else train_parts).append(encoded)
 
-        self.train_df = pd.concat(train_parts, ignore_index=True) if train_parts else pd.DataFrame()
-        self.test_df = pd.concat(test_parts, ignore_index=True) if test_parts else pd.DataFrame()
-        self.dnf_df = pd.concat([self.train_df, self.test_df], ignore_index=True)
+        # Building dataframes and saving them
+        if train_parts:
+            self.train_df = pd.concat(train_parts, ignore_index=True)
+            self.train_df = self.train_df.dropna(subset=["target"])
+        else:
+            self.train_df = pd.DataFrame()
 
-        # Drop target nan
-        self.train_df = self.train_df.dropna(subset=["target"])
-        self.test_df = self.test_df.dropna(subset=["target"])
+        if test_parts:
+            self.test_df = pd.concat(test_parts, ignore_index=True)
+            self.test_df = self.test_df.dropna(subset=["target"])
+        else:
+            self.test_df = pd.DataFrame()
 
-        # Make circuit_id categorical
-        self.train_df["circuit_id"] = self.train_df["circuit_id"].astype(self.circuit_dtype)
-        self.test_df["circuit_id"] = self.test_df["circuit_id"].astype(self.circuit_dtype)
+        self.dnf_df = pd.concat(dnf_parts, ignore_index=True) if dnf_parts else pd.DataFrame()
+
+        # The history may not have existed when DataLoader was constructed and
+        # may have been rebuilt during this load. Refresh the dtype now instead
+        # of leaving it as None (astype(None) attempts a numeric conversion).
+        self._refresh_circuit_dtype(self.history_df, self.train_df, self.test_df)
+        if self.circuit_dtype is None:
+            raise ValueError("Impossibile costruire le categorie: nessun circuit_id disponibile")
+        if not self.train_df.empty:
+            self.train_df["circuit_id"] = self.train_df["circuit_id"].astype(self.circuit_dtype)
+        if not self.test_df.empty:
+            self.test_df["circuit_id"] = self.test_df["circuit_id"].astype(self.circuit_dtype)
+
+        # Store for future use
+        self.dnf_df.to_parquet(self.data_dir / "dnf_df.parquet", index=False)
 
         return self.train_df, self.test_df
 
+    def _build_history(self, year: int, force: bool = False):
+        pre_schedule = fastf1.get_event_schedule(year)
+        pre_n_races = pre_schedule["RoundNumber"].max()
+
+        # Load races of the year before STARTING_YEAR in the history
+        self.log.info(f"Building history for {year} season...")
+        for i in range(1, pre_n_races + 1):
+            event = self.gold.silver.get_clean_event_metadata(year, i, force)
+            if event["EventFormat"].iloc[0] != "conventional":
+                self._build_history_session(year, False, "sr", force, i, event)
+                self._build_history_session(year, False, "gp", force, i, event)
+            self._build_history_session(year, True, "gp", force, i, event)
+
+    def _build_history_session(
+        self, year, is_conventional, race_type: str, force: bool, race_number: int, event: pd.DataFrame
+    ):
+        self.log.info(f"Building history for {race_type} session of round {race_number} of {year} season...")
+
+        location = event["Location"].iloc[0]
+        quali_session = get_session_mapping(year, is_conventional, race_type, "quali")
+        quali_results = self.gold.silver.get_clean_results(year, race_number, quali_session, force)
+        race_session = get_session_mapping(year, is_conventional, race_type, "race")
+        race_date = event[f"Session{race_session}Date"].iloc[0]
+        race_results = self.gold.silver.get_clean_results(year, race_number, race_session, force)
+        race_laps = self.gold.silver.get_untouched_laps(year, race_number, race_session, force)
+        if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
+            race_date = race_date.tz_convert("UTC").tz_localize(None)
+        self.history_builder.update_history(
+            year, race_number, race_session, quali_results, race_results, race_laps, location, race_date, force=force
+        )
+
     # Target Encoding: useful for the model to know the general strength of a driver/team
-    # driver_id, team_id, circuit_id
-    # ma questi presentano problemi nei dati quidni ne devo creare di miei con una mappa:
-    #   driver_id: Abbreviation + first name + last name
-    #   team_id: mappare il TeamName con un mio dizionario da aggiornare per ogni stagione
-    #   circuit_id: usare location precisa del circuito (non universale ma quasi)
-    # Inoltre questi non vanno bene lasciati come stringe per XGBRanker
-    # quindi o li sostituisce tramite target_encoding (driver_id e team_id) o li si tralascia in seguito (circuit_id)
+    # Invece di farli diventare categorical, li trasformiamo in numerici, con un encoding basato sullo storico dei podi.
     def compute_target_encoding_map(
         self,
         group_col: str,  # "driver_id" | "team_id"

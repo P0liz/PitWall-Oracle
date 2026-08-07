@@ -3,7 +3,8 @@ import numpy as np
 import optuna
 from xgboost import XGBRanker
 from .config import GLOBAL_SEED
-from .trainer import TO_DROP, make_weights
+from .trainer import make_weights
+from .ranking_metrics import evaluate_grouped_rankings
 
 FIXED_PARAMS = {
     "objective": "rank:ndcg",
@@ -11,6 +12,7 @@ FIXED_PARAMS = {
     "random_state": GLOBAL_SEED,
     "missing": np.nan,
     "enable_categorical": True,
+    "ndcg_exp_gain": False,
 }
 
 
@@ -56,7 +58,7 @@ def run_hpo_optuna(trainer, n_trials=20, n_folds=4, min_train_races=15):
     df["qid"] = pd.factorize(df["race_date"])[0]
 
     # 3. Prepariamo le feature e i target
-    X_full = df.drop(TO_DROP + ["qid"], axis=1)
+    X_full = trainer.feature_frame(df)
     y_full = df["target"]
     qid_full = df["qid"]
     unique_qids = qid_full.unique()
@@ -78,6 +80,8 @@ def run_hpo_optuna(trainer, n_trials=20, n_folds=4, min_train_races=15):
         decay_rate = trial.suggest_float("decay_rate", 0.0005, 0.015, log=True)
 
         fold_scores = []
+        fold_teammate_scores = []
+        fold_position_maes = []
         best_iterations = []
 
         for train_qids, val_qids in folds:
@@ -103,14 +107,18 @@ def run_hpo_optuna(trainer, n_trials=20, n_folds=4, min_train_races=15):
             )
 
             preds = model.predict(X_va_f)
-            val_group_sizes_f = qid_va_f.value_counts().sort_index().to_numpy()
-            fold_scores.append(compute_ndcg(y_va_f.to_numpy(), preds, group_sizes=val_group_sizes_f))
+            validation_metrics = evaluate_grouped_rankings(df.loc[is_va], preds)
+            fold_scores.append(float(validation_metrics["pairwise_accuracy"].mean()))
+            fold_teammate_scores.append(float(validation_metrics["teammate_pairwise_accuracy"].mean()))
+            fold_position_maes.append(float(validation_metrics["position_mae"].mean()))
             best_iterations.append(model.best_iteration)
 
         # Diagnostica: se i best_iteration tra fold sono molto dispersi, il dataset
         # è probabilmente ancora troppo piccolo/rumoroso perché questo valore sia stabile.
-        trial.set_user_attr("mean_best_iteration", int(np.mean(best_iterations)))
+        trial.set_user_attr("mean_best_iteration", int(np.rint(np.mean(best_iterations))) + 1)
         trial.set_user_attr("std_best_iteration", float(np.std(best_iterations)))
+        trial.set_user_attr("mean_teammate_pairwise_accuracy", float(np.mean(fold_teammate_scores)))
+        trial.set_user_attr("mean_position_mae", float(np.mean(fold_position_maes)))
 
         return float(np.mean(fold_scores))
 
@@ -135,82 +143,3 @@ def run_hpo_optuna(trainer, n_trials=20, n_folds=4, min_train_races=15):
     )
 
     return best_params, decay_rate
-
-
-def compute_precision_at_k(y_true: np.ndarray, y_score: np.ndarray, k: int = 3) -> float:
-    """
-    Precision@K per ranking.
-
-    Parameters
-    ----------
-    y_true : array-like
-        Target (20=primo, 19=secondo, ...)
-    y_score : array-like
-        Score predetti dal modello.
-    k : int
-        Numero di posizioni da considerare.
-
-    Returns
-    -------
-    float
-    """
-
-    # Top-k reali
-    true_topk = np.argsort(-y_true)[:k]
-
-    # Top-k predetti
-    pred_topk = np.argsort(-y_score)[:k]
-
-    hits = len(set(true_topk) & set(pred_topk))
-
-    return hits / k
-
-
-def compute_ndcg(
-    y_true_rel: np.ndarray, y_pred_score: np.ndarray, group_sizes: np.ndarray | None = None, k: int = 22
-) -> float:
-    """
-    NDCG@k coerente con l'obiettivo rank:ndcg di XGBRanker.
-
-    y_true_rel: le label di rilevanza (Y = n_drivers - posizione + 1), NON le posizioni grezze --
-                sklearn.ndcg_score assume "valore alto = piu' rilevante", stessa convenzione
-                gia' discussa per il target del ranker.
-    group_sizes: dimensione di ogni gruppo/gara, in ordine. Se None, si assume un'unica gara
-                 (caso tipico della valutazione prequenziale: una gara alla volta).
-    k: normalmente coincide col numero di piloti in griglia (~20); troncarlo piu' in basso
-       avrebbe poco senso qui, a differenza dei sistemi di recommendation con liste lunghissime.
-
-    NB: sklearn.metrics.ndcg_score vuole array 2D shape (n_queries, n_docs_per_query) --
-    per gruppi di dimensione diversa (es. weekend con ritiri, DNS) non si puo' fare un unico
-    array rettangolare: si itera gara per gara e si fa la media (stessa convenzione usata
-    nella walk-forward CV su 2024-2025 -- media semplice tra le gare del fold, non pesata
-    per numero di piloti).
-    """
-    from sklearn.metrics import ndcg_score
-
-    y_true_rel = np.asarray(y_true_rel, dtype=float)
-    y_pred_score = np.asarray(y_pred_score, dtype=float)
-
-    if group_sizes is None:
-        group_sizes = np.array([len(y_true_rel)])
-
-    if group_sizes.sum() != len(y_true_rel):
-        raise ValueError("group_sizes non copre tutte le righe passate a compute_ndcg")
-
-    ndcgs = []
-    start = 0
-    for size in group_sizes:
-        end = start + size
-        true_slice = y_true_rel[start:end]
-        pred_slice = y_pred_score[start:end]
-
-        # ndcg_score richiede almeno 2 elementi rilevanti distinti per essere non-degenere;
-        # con un solo pilota nel gruppo (caso limite, es. dati corrotti/singolo DNS) si salta.
-        if size >= 2:
-            ndcgs.append(ndcg_score(true_slice.reshape(1, -1), pred_slice.reshape(1, -1), k=min(k, size)))
-        start = end
-
-    if not ndcgs:
-        return float("nan")
-
-    return float(np.mean(ndcgs))
