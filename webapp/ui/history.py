@@ -51,8 +51,12 @@ def _display_history_rows(history_document: dict) -> list[dict]:
     """Replace missing numeric finishes with their published race status."""
     rows = history_rows(history_document)
     for row, comparison in zip(rows, history_document["comparisons"], strict=True):
-        if row["Reale"] is None:
-            row["Reale"] = comparison["status"]
+        actual_position = comparison["actual_position"]
+        row["Reale"] = (
+            str(actual_position)
+            if actual_position is not None
+            else comparison["status"]
+        )
     return rows
 
 

@@ -2,6 +2,41 @@
 
 Custom trained ML model to predict Formula 1 race outcomes.
 
+## Web app
+
+The public app serves precomputed PitWall Oracle results through a read-only
+FastAPI API and presents them in Streamlit. The hosted services only read the
+validated JSON published in [`webapp/api/data`](webapp/api/data).
+
+The UI separates the next-race prediction and Head-to-Head tool from the
+historical predicted-versus-real comparison.
+
+Install the small web-app dependencies in the local virtual environment:
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r webapp\requirements.txt
+.\venv\Scripts\python.exe -m pip install -r webapp\ui\requirements.txt
+```
+
+Start the API in one PowerShell terminal:
+
+```powershell
+.\venv\Scripts\python.exe -m uvicorn webapp.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Then start Streamlit from the repository root in a second terminal:
+
+```powershell
+$env:PITWALL_API_URL = "http://127.0.0.1:8000"
+.\venv\Scripts\python.exe -m streamlit run webapp/ui/streamlit_app.py
+```
+
+For details, see the [web-app design](docs/superpowers/specs/2026-08-08-web-app-design.md)
+and [implementation plan](docs/superpowers/plans/2026-08-08-web-app-mvp.md).
+The implementation is organised around the [API app](webapp/api/app.py),
+[data contracts](webapp/api/schemas.py), [JSON repository](webapp/api/repository.py),
+and [Streamlit entry point](webapp/ui/streamlit_app.py).
+
 ## Ranker training and evaluation
 
 The ranker uses the explicit `PRODUCTION_FEATURES` tuple in

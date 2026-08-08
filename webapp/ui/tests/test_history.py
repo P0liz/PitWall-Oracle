@@ -102,6 +102,31 @@ class HistoryViewModelTests(unittest.TestCase):
             ],
         )
 
+    def test_history_rows_use_consistent_friendly_actual_result_strings(self) -> None:
+        document = {
+            "comparisons": [
+                {
+                    "display_name": "Lando Norris",
+                    "predicted_position": 1,
+                    "actual_position": 2,
+                    "position_difference": 1,
+                    "status": "Finished",
+                },
+                {
+                    "display_name": "Lewis Hamilton",
+                    "predicted_position": 6,
+                    "actual_position": None,
+                    "position_difference": None,
+                    "status": "Retired",
+                },
+            ]
+        }
+
+        rows = _display_history_rows(document)
+
+        self.assertEqual([row["Reale"] for row in rows], ["2", "Retired"])
+        self.assertTrue(all(isinstance(row["Reale"], str) for row in rows))
+
 
 if __name__ == "__main__":
     unittest.main()
