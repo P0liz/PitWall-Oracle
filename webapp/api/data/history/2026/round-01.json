@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "race": {"season": 2026, "round": 1, "name": "Australian Grand Prix", "circuit": "Melbourne", "start_time": "2026-03-08T04:00:00Z"},
+  "prediction_path": "predictions/2026/round-01.json",
+  "publication": {"type": "backtest", "generated_at": "2026-08-08T12:00:00Z", "data_cutoff": "2026-03-07T06:59:59Z", "model_artifact": "demo-backtest", "dnf_strategy": "team_beta", "simulations": 10000, "seed": 2003},
+  "actual_results": [
+    {"driver_id": "nor_lando_norris", "actual_position": 2, "status": "Finished"},
+    {"driver_id": "ver_max_verstappen", "actual_position": 1, "status": "Finished"},
+    {"driver_id": "pia_oscar_piastri", "actual_position": 4, "status": "Finished"},
+    {"driver_id": "lec_charles_leclerc", "actual_position": 3, "status": "Finished"},
+    {"driver_id": "rus_george_russell", "actual_position": 5, "status": "Finished"},
+    {"driver_id": "ham_lewis_hamilton", "actual_position": null, "status": "Retired"}
+  ],
+  "comparisons": [
+    {"driver_id": "nor_lando_norris", "display_name": "Lando Norris", "predicted_position": 1, "actual_position": 2, "position_difference": 1, "status": "Finished"},
+    {"driver_id": "ver_max_verstappen", "display_name": "Max Verstappen", "predicted_position": 2, "actual_position": 1, "position_difference": -1, "status": "Finished"},
+    {"driver_id": "pia_oscar_piastri", "display_name": "Oscar Piastri", "predicted_position": 3, "actual_position": 4, "position_difference": 1, "status": "Finished"},
+    {"driver_id": "lec_charles_leclerc", "display_name": "Charles Leclerc", "predicted_position": 4, "actual_position": 3, "position_difference": -1, "status": "Finished"},
+    {"driver_id": "rus_george_russell", "display_name": "George Russell", "predicted_position": 5, "actual_position": 5, "position_difference": 0, "status": "Finished"},
+    {"driver_id": "ham_lewis_hamilton", "display_name": "Lewis Hamilton", "predicted_position": 6, "actual_position": null, "position_difference": null, "status": "Retired"}
+  ],
+  "summary": {"mean_absolute_position_error": 0.8, "podium_hits": 2, "podium_total": 3, "top_five_hits": 5, "top_five_total": 5}
+}
