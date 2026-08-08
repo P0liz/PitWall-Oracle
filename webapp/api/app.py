@@ -7,12 +7,12 @@ from typing import NoReturn
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from webapp.api.repository import (
+from .repository import (
     InvalidPublishedData,
     ResultNotFound,
     ResultsRepository,
 )
-from webapp.api.schemas import (
+from .schemas import (
     HeadToHeadResponse,
     HistoryDocument,
     HistoryIndex,

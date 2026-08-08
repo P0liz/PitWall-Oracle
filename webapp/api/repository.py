@@ -5,7 +5,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from webapp.api.schemas import (
+from .schemas import (
     CurrentPredictionPointer,
     HeadToHeadResponse,
     HistoryDocument,

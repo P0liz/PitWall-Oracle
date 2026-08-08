@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -164,6 +166,18 @@ class ApiTests(unittest.TestCase):
                 "/api/v1/history/{season}/{round_number}",
             },
         )
+
+    def test_api_module_imports_from_vercel_webapp_root(self) -> None:
+        webapp_root = Path(__file__).parents[2]
+        result = subprocess.run(
+            [sys.executable, "-c", "import api.app; assert api.app.app.title == 'PitWall Oracle API'"],
+            cwd=webapp_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_handlers_return_repository_response_models(self) -> None:
         self.assertEqual(health()["status"], "ok")
