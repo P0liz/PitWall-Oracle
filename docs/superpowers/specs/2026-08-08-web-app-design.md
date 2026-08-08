@@ -1,7 +1,7 @@
 # PitWall Oracle Web App — Design
 
-**Date:** 2026-08-08  
-**Status:** Approved  
+**Date:** 2026-08-08
+**Status:** Approved
 **Scope:** Public portfolio MVP for the 2026 Formula 1 season and later
 
 ## Summary
