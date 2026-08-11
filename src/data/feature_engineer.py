@@ -8,15 +8,10 @@ from src.utils import get_driver_fastest_quali_time, setup_custom_logger, is_rac
 Possibili features da inserire in futuro (in caso manchino dati)
 In generale evitare di mettere "team features" che ripetano quelle già presenti sul driver
  - Dati sul circuito: elevation height o safety car rate,
- - Average degradation rate, basato sulla history delle gare passate
  - Historical weather: andando a prendere negli ultimi, bho 10 anni, tramite i dati di fast f1, se la gara è stata bagnata; 
     costruire una history a parte che comprenda tutti i circuiti facendo gare_bagnate/tot_gare
-- Strategy wise featues?
 """
 
-# Alcune idee per feature da inserire per il dnf_model
-# Inserite tutte nei parquet gold, ma poi quelle che non centrano con il ranking le escluderei
-# e terrei solo per per trainare il dnf regressor
 # TODO: creare alcune feature semplici per il dnf model
 # andare a prendere il logistic regressor ottimizzato e dargli un numero maggiore di feature
 # per vedere se porta a miglioramenti nel simulator, altrimenti bho
@@ -83,6 +78,36 @@ class FeatureEngineering:
         deltas = driver_laps["LapTime"] - leader_time
         return float(np.mean(deltas))
 
+    def compute_teammate_recent_race_h2h(
+        self, history_before: pd.DataFrame, driver_id: str, teammate_id: str, races: int = CONSISTENCY_WINDOW
+    ):
+        """Recent head-to-head score against the current teammate."""
+
+        columns = ["race_date", "team_id", "race_position"]
+
+        driver_history = history_before.loc[history_before["driver_id"] == driver_id, columns].rename(
+            columns={"team_id": "driver_team_id", "race_position": "driver_position"}
+        )
+
+        teammate_history = history_before.loc[history_before["driver_id"] == teammate_id, columns].rename(
+            columns={"team_id": "teammate_team_id", "race_position": "teammate_position"}
+        )
+
+        shared_races = driver_history.merge(teammate_history, on="race_date", how="inner")
+        shared_races = shared_races.loc[shared_races["driver_team_id"] == shared_races["teammate_team_id"]].dropna(
+            subset=["driver_position", "teammate_position"]
+        )
+        if shared_races.empty:
+            return np.nan
+
+        shared_races = shared_races.sort_values("race_date").tail(races)
+
+        # Positivo se driver_id ha concluso davanti al compagno.
+        outcomes = np.sign(shared_races["teammate_position"] - shared_races["driver_position"])
+
+        score = outcomes.ewm(span=races).mean().iloc[-1]
+        return float(score)
+
     def compute_team_race_pace(self, long_run_laps: pd.DataFrame, team: str):
         team_laps = long_run_laps[long_run_laps["Team"] == team]
         if team_laps.empty:
@@ -133,7 +158,39 @@ class FeatureEngineering:
         session_best_time = quali_results_df[["Q1", "Q2", "Q3"]].min().min().total_seconds()
         return float(driver_time - session_best_time)
 
-    def compute_teammate_deltas(self, gold_df: pd.DataFrame, driver_a: str, driver_b: str):
+    def compute_teammate_recent_quali_h2h(
+        self, history_before: pd.DataFrame, driver_id: str, teammate_id: str, races: int = CONSISTENCY_WINDOW
+    ):
+        """Recent head-to-head score against the current teammate."""
+
+        columns = ["race_date", "team_id", "quali_position"]
+
+        driver_history = history_before.loc[history_before["driver_id"] == driver_id, columns].rename(
+            columns={"team_id": "driver_team_id", "quali_position": "driver_position"}
+        )
+
+        teammate_history = history_before.loc[history_before["driver_id"] == teammate_id, columns].rename(
+            columns={"team_id": "teammate_team_id", "quali_position": "teammate_position"}
+        )
+
+        shared_qualis = driver_history.merge(teammate_history, on="race_date", how="inner")
+        shared_qualis = shared_qualis.loc[shared_qualis["driver_team_id"] == shared_qualis["teammate_team_id"]].dropna(
+            subset=["driver_position", "teammate_position"]
+        )
+        if shared_qualis.empty:
+            return np.nan
+
+        shared_qualis = shared_qualis.sort_values("race_date").tail(races)
+
+        # Positivo se driver_id ha concluso davanti al compagno.
+        outcomes = np.sign(shared_qualis["teammate_position"] - shared_qualis["driver_position"])
+
+        score = outcomes.ewm(span=races).mean().iloc[-1]
+        return float(score)
+
+    def compute_teammate_deltas(
+        self, gold_df: pd.DataFrame, history_before: pd.DataFrame, driver_a: str, driver_b: str
+    ):
         """Compute the difference between the two teammates for each feature in the list."""
         teammate_features = {
             "degradation_rate": "deg",
@@ -143,7 +200,12 @@ class FeatureEngineering:
             "avg_positions_gained": "pos_gained",
             "lap1_avg_pos_gained": "lap1_pos_gained",
             "wet_affinity": "wet_affinity",
+            "grid_position": "grid_position",
+            "driver_consistency": "consistency",
+            "driver_recent_race_pace": "recent_pace",
         }
+
+        # Classic delta features
         for feature in teammate_features.keys():
             teammate_f = teammate_features[feature]
             if feature == "quali_pace":
@@ -181,6 +243,19 @@ class FeatureEngineering:
                 delta = driver_a_feature - driver_b_feature
                 gold_df.loc[gold_df["driver_id"] == driver_a, f"teammate_delta_{teammate_f}"] = delta
                 gold_df.loc[gold_df["driver_id"] == driver_b, f"teammate_delta_{teammate_f}"] = -delta
+
+        # Custom head to head fetures
+        race_h2h = self.compute_teammate_recent_race_h2h(history_before, driver_a, driver_b)
+        gold_df.loc[gold_df["driver_id"] == driver_a, "teammate_recent_race_h2h"] = race_h2h
+        gold_df.loc[gold_df["driver_id"] == driver_b, "teammate_recent_race_h2h"] = (
+            -race_h2h if pd.notna(race_h2h) else np.nan
+        )
+
+        quali_h2h = self.compute_teammate_recent_quali_h2h(history_before, driver_a, driver_b)
+        gold_df.loc[gold_df["driver_id"] == driver_a, "teammate_recent_quali_h2h"] = quali_h2h
+        gold_df.loc[gold_df["driver_id"] == driver_b, "teammate_recent_quali_h2h"] = (
+            -quali_h2h if pd.notna(quali_h2h) else np.nan
+        )
 
     def get_practice_position(self, practice_ranking: pd.DataFrame, abbreviation: str) -> float:
         matches = practice_ranking.index[practice_ranking["Driver"] == abbreviation]
@@ -439,7 +514,7 @@ class FeatureEngineering:
         return float(std_positions_gained)
 
     def compute_team_development_trend(
-        self, history_before: pd.DataFrame, team_id: str, year: int, min_races: int = MIN_DEV_RACES
+        self, history_before: pd.DataFrame, team_id: str, min_races: int = MIN_DEV_RACES
     ):
         """
         Trend di sviluppo del team, calcolato sulla pendenza del gap
@@ -518,9 +593,7 @@ class FeatureEngineering:
         score = per_race.ewm(span=races, adjust=False).mean().iloc[-1]
         return float(score)
 
-    def compute_recent_race_pace(
-        self, history_before: pd.DataFrame, year: int, driver_id: str, races: int = CURRENT_FORM_RACES
-    ):
+    def compute_recent_race_pace(self, history_before: pd.DataFrame, driver_id: str, races: int = CURRENT_FORM_RACES):
         """EWMA of the driver's percentage pace gap in recent races. Lower is better."""
         driver_history = history_before.loc[
             (history_before["driver_id"] == driver_id), ["race_date", "race_pace"]

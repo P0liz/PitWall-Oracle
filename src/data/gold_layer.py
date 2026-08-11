@@ -33,8 +33,8 @@ class GoldLayer:
         """
         Main function to call for the data_loader
         """
-        assert year >= 2022, "Year not supported: must be >= 2022"
-        assert (race_number <= 24) & (race_number >= 1), "Race number {id} does not exist: max 24 races"
+        assert year >= 2023, "Year not supported: must be >= 2023"
+        assert 1 <= race_number <= 24, f"Race number {race_number} does not exist: max 24 races"
         event = self.silver.get_clean_event_metadata(year, race_number, force)
         results = []
         self.log.info(f"Building features for {year} Grand Prix #{race_number}...")
@@ -48,8 +48,8 @@ class GoldLayer:
 
     # Does not use race_results, only for predictions
     def build_prediction_features(self, year: int, race_number: int, session: int, force: bool = False):
-        assert year >= 2022
-        assert 1 <= race_number <= 24
+        assert year >= 2024, "Predictions only on 2024+ seasons"
+        assert 1 <= race_number <= 24, f"Race number {race_number} does not exist: max 24 races"
         assert session in [3, 5], "Predictions only on race sessions"
         event = self.silver.get_clean_event_metadata(year, race_number, force)
 
@@ -101,8 +101,11 @@ class GoldLayer:
         race_session = get_session_mapping(year, is_conventional, race_type, "race")
         race_date = event[f"Session{race_session}Date"].iloc[0]
         race_results_df = silver.get_clean_results(year, race_number, race_session, force)
-        race_laps_df = (
+        raw_race_laps_df = (
             silver.get_untouched_laps(year, race_number, race_session, force) if not prediction_mode else pd.DataFrame()
+        )
+        clean_race_laps_df = (
+            silver.get_clean_laps(year, race_number, race_session, force) if not prediction_mode else pd.DataFrame()
         )
 
         # Normalize to tz-naive UTC scalar
@@ -126,7 +129,8 @@ class GoldLayer:
                 session,
                 quali_results_df,
                 race_results_df,
-                race_laps_df,
+                raw_race_laps_df,
+                clean_race_laps_df,
                 circuit_location,
                 race_date,
                 force=force,
@@ -177,17 +181,20 @@ class GoldLayer:
                 "degradation_rate": self.feature_engineer.compute_degradation_rate(
                     race_sim_best_stint_df, abbreviation
                 ),
-                "teammate_delta_deg": np.nan,  # computed at the end
+                "teammate_delta_deg": np.nan,
                 "mean_race_pace": self.feature_engineer.compute_race_pace(race_sim_best_stint_df, abbreviation),
-                "teammate_delta_pace": np.nan,  # computed at the end
+                "teammate_delta_pace": np.nan,
+                "teammate_recent_race_h2h": np.nan,
                 "late_stint_dropoff": self.feature_engineer.compute_late_stint_dropoff(
                     race_sim_best_stint_df, abbreviation
                 ),
                 "team_race_pace": self.feature_engineer.compute_team_race_pace(race_sim_best_stint_df, team),
                 "quali_pace": self.feature_engineer.compute_quali_pace(quali_results_df, driver_id),
+                "teammate_delta_quali": np.nan,
                 "practice_position": self.feature_engineer.get_practice_position(practice_rankings, abbreviation),
                 "grid_position": grid_position,
-                "teammate_delta_quali": np.nan,  # computed at the end
+                "teammate_delta_grid_position": np.nan,
+                "teammate_recent_quali_h2h": np.nan,
                 # Categoria B: causali, derivate da fatti grezzi nella history (safe, non target-derived)
                 "team_dnf_rate": self.feature_engineer.compute_team_dnf_rate(history_before, year, team_id),
                 "driver_dnf_rate": self.feature_engineer.compute_driver_dnf_rate(history_before, year, driver_id),
@@ -205,17 +212,17 @@ class GoldLayer:
                 "quali_current_form": self.feature_engineer.compute_quali_current_form(history_before, driver_id),
                 "teammate_delta_race_form": np.nan,
                 "driver_consistency": self.feature_engineer.compute_driver_consistency(history_before, driver_id),
+                "teammate_delta_consistency": np.nan,
                 "avg_positions_gained": self.feature_engineer.compute_avg_positions_gained(history_before, driver_id),
                 "teammate_delta_pos_gained": np.nan,
                 "lap1_avg_pos_gained": self.feature_engineer.compute_lap1_avg_positions_gained(
                     history_before, driver_id
                 ),
                 "teammate_delta_lap1_pos_gained": np.nan,
-                "driver_recent_race_pace": self.feature_engineer.compute_recent_race_pace(
-                    history_before, year, driver_id
-                ),
+                "driver_recent_race_pace": self.feature_engineer.compute_recent_race_pace(history_before, driver_id),
+                "teammate_delta_recent_pace": np.nan,
                 "overtaking_difficulty": overtaking_difficulty,
-                "team_development": self.feature_engineer.compute_team_development_trend(history_before, team_id, year),
+                "team_development": self.feature_engineer.compute_team_development_trend(history_before, team_id),
                 "team_pit_execution_index": self.feature_engineer.compute_team_pit_execution_index(
                     history_before, team_id
                 ),
@@ -250,7 +257,7 @@ class GoldLayer:
                 if (
                     is_dnf
                     or pd.isna(position)
-                    or got_end_penalty(abbreviation, race_laps_df, race_results_df)
+                    or got_end_penalty(abbreviation, raw_race_laps_df, race_results_df)
                     or normalized_status in POST_RACE_EXCLUSION_STATUSES
                 ):
                     row["target"] = np.nan  # esclusa dal training
@@ -261,11 +268,13 @@ class GoldLayer:
             gold_rows.append(row)
 
         gold_df = pd.DataFrame(gold_rows)
-        self._compute_teammate_features(gold_df, quali_results_df)
+        self._compute_teammate_features(gold_df, history_before, quali_results_df)
 
         return gold_df
 
-    def _compute_teammate_features(self, gold_df: pd.DataFrame, quali_results_df: pd.DataFrame):
+    def _compute_teammate_features(
+        self, gold_df: pd.DataFrame, history_before: pd.DataFrame, quali_results_df: pd.DataFrame
+    ):
         """Compute teammate-based features using the current gold_df."""
         # Group by team_id
         for team_id in gold_df["team_id"].unique():
@@ -281,7 +290,7 @@ class GoldLayer:
             self.feature_engineer.quali_results = quali_results_df
 
             # Compute teammate deltas
-            self.feature_engineer.compute_teammate_deltas(gold_df, driver_a, driver_b)
+            self.feature_engineer.compute_teammate_deltas(gold_df, history_before, driver_a, driver_b)
 
     def find_race_sim_stint(self, practice_laps: pd.DataFrame, drivers: list) -> pd.DataFrame:
         """Find longest stint for each driver, in the given laps (should be laps from only on session)"""

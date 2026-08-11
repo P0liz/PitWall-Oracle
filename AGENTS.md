@@ -13,6 +13,12 @@ Prefer:
 .\venv\Scripts\python.exe <script>
 ```
 
+The repository `venv` is valid even when a sandboxed shell cannot reach its
+`base_prefix` under `AppData\Local\Python`. If that access fails, rerun the
+same `venv` command with the required sandbox escalation. Do not diagnose the
+environment as broken, switch to `uv`, or recreate the virtual environment
+based only on that sandbox error.
+
 Do not assume the working tree is clean. Preserve unrelated user changes,
 generated models, cached data, and experiment results.
 
@@ -109,6 +115,12 @@ Typical command:
 ```powershell
 .\venv\Scripts\python.exe train_ranker_optimized.py
 ```
+
+## Coding policy
+
+- Never create commits or push changes. Implement what is asked and then let
+the user decide what to commit.
+- If the requested changes only concern a small portion of code (few lines in one or two files), it is not necessary to write a full plan or specs document; instead write a preview of the corrections in chat and ask for the user's permission to procede.
 
 ## Testing policy
 

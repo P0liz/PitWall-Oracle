@@ -2,7 +2,7 @@ from src.data.gold_layer import GoldLayer
 from src.trainer import DynamicTraining, StaticTraining, select_model_feature_frame
 from src.model_optimization import FIXED_PARAMS, run_hpo_optuna
 from src.data.data_loader import DataLoader, NEW_YEAR, CATEGORICAL_COLS
-from src.config import DEFAULT_DECAY_RATE, to_log
+from src.config import DEFAULT_DECAY_RATE, to_log_ranker, TARGET_MULTIPLIER, RANKER_OPTUNA_TRIALS
 from src.ranker_features import PRODUCTION_FEATURES
 from src.ranking_metrics import decide_promotion, evaluate_grouped_rankings, race_ranking_metrics
 from ml_flow_auto import launch_mlflow_server, MLFLOW_HOST, MLFLOW_PORT
@@ -21,13 +21,13 @@ BASE_MODEL = "pitwall_oracle_base.json"
 LATEST_MODEL = "pitwall_oracle_latest.json"
 PENDING_MODEL = "pitwall_oracle_pending.json"
 FORCE = False
-RUN_HPO = True  # Imposta a True se vuoi rieseguire la ricerca parametri con Optuna
+RUN_HPO = False
 
 
 def run_pipeline():
     data_loader = DataLoader()
     selected_features = PRODUCTION_FEATURES
-    target_train_multiplier = 1.0
+    target_train_multiplier = TARGET_MULTIPLIER
 
     # Inizializziamo MLflow Parent Run per l'intero ciclo di addestramento/test
     with mlflow.start_run(run_name=f"F1_Season_Simulation_{NEW_YEAR}") as parent_run:
@@ -44,17 +44,25 @@ def run_pipeline():
             target_train_multiplier=target_train_multiplier,
         )
         trainer_static.log.info("Inizio pipeline training")
-        asyncio.run(trainer_static.prepare_data(force=FORCE))
-        mlflow.log_params(to_log)
+        static_train_df, static_test_df = asyncio.run(trainer_static.prepare_data(force=FORCE))
+        static_df = pd.concat([static_train_df, static_test_df], ignore_index=True)
+        mlflow.log_params(to_log_ranker)
 
         # Default
-        best_params = {**FIXED_PARAMS, "learning_rate": 0.05, "max_depth": 4, "n_estimators": 200}
+        best_params = {
+            **FIXED_PARAMS,
+            "learning_rate": 0.14453683332426176,
+            "max_depth": 3,
+            "subsample": 0.8797458349145832,
+            "colsample_bytree": 0.7026515011475697,
+            "n_estimators": 23,
+        }
         decay_rate = DEFAULT_DECAY_RATE
 
         if RUN_HPO:
             trainer_static.log.info("Avvio HPO con Optuna per il modello statico...")
             # Eseguiamo Optuna e tracciamo i parametri migliori su MLflow
-            best_params, decay_rate = run_hpo_optuna(trainer_static, n_trials=15)
+            best_params, decay_rate = run_hpo_optuna(trainer_static, n_trials=RANKER_OPTUNA_TRIALS)
             mlflow.log_params({f"optuna_{k}": v for k, v in best_params.items()})
             mlflow.log_param("optuna_decay_rate", decay_rate)
 
@@ -110,7 +118,6 @@ def run_pipeline():
 
         trainer_dynamic.log.info("Inizio testing su gare dinamiche...")
         challenger = None
-        duel_history: list[dict[str, float]] = []
         champion_history: list[dict[str, float]] = []
         for idx, date in enumerate(races):
             race_idx = idx + 1
@@ -171,25 +178,25 @@ def run_pipeline():
                     **{f"champion_{metric}": value for metric, value in champion_metrics.items()},
                     **{f"challenger_{metric}": value for metric, value in challenger_metrics.items()},
                 }
-                duel_history.append(duel_row)
                 for metric in champion_metrics:
                     mlflow.log_metric(
                         f"delta_{metric}", challenger_metrics[metric] - champion_metrics[metric], step=race_idx
                     )
 
                 assert champion_model is not challenger  # guardia esplicita, non deve mai fallire ora
-                decision = decide_promotion(pd.DataFrame(duel_history))
+                decision = decide_promotion(pd.DataFrame([duel_row]))
 
                 # Decisione muretto box: Promozione o Rifiuto
                 if decision.promote:
                     new_filename = f"pitwall_oracle_{NEW_YEAR}_{race_idx}.json"
+                    assert trainer_dynamic.ranker is challenger
                     trainer_dynamic.save_artifacts(new_filename)
 
                     # Aggiorniamo il puntatore locale
                     champion_path = trainer_dynamic.model_dir / new_filename
 
                     # Salviamo il nuovo Champion su MLflow
-                    mlflow.log_artifact(str(champion_path), artifact_path=f"models")
+                    mlflow.log_artifact(str(champion_path), artifact_path="models")
                     mlflow.log_metric("challenger_promoted", 1.0, step=race_idx)
 
                     trainer_dynamic.log.info(
@@ -198,7 +205,6 @@ def run_pipeline():
                         f"delta_teammate={decision.mean_delta_teammate:+.4f} | "
                         f"delta_mae={decision.mean_delta_position_mae:+.3f}"
                     )
-                    duel_history.clear()
                 else:
                     mlflow.log_metric("challenger_promoted", 0.0, step=race_idx)
                     trainer_dynamic.log.info(
@@ -209,7 +215,7 @@ def run_pipeline():
                     )
 
             # Addestramento del Challenger con i dati aggiornati fino alla gara corrente (per prossima iter)
-            asyncio.run(trainer_dynamic.prepare_data(date, force=FORCE))
+            asyncio.run(trainer_dynamic.prepare_data(static_df, date, force=FORCE))
             # Istanziamo il challenger applicando i parametri ottimali trovati da Optuna
             trainer_dynamic.ranker = XGBRanker(**best_params)
             challenger = trainer_dynamic.train()

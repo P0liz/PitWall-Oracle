@@ -133,7 +133,7 @@ class PromotionDecision:
     reason: str
 
 
-def decide_promotion(duels: pd.DataFrame, *, minimum_races: int = 3) -> PromotionDecision:
+def decide_promotion(duels: pd.DataFrame) -> PromotionDecision:
     """Conservative ranker-only promotion rule over paired race-level duels."""
 
     required = {
@@ -145,8 +145,6 @@ def decide_promotion(duels: pd.DataFrame, *, minimum_races: int = 3) -> Promotio
         "challenger_position_mae",
     }
     missing = sorted(required - set(duels.columns))
-    if minimum_races < 1:
-        raise ValueError("minimum_races deve essere positivo")
     if missing or duels.empty:
         raise ValueError(f"Duelli insufficienti per la promozione; colonne mancanti: {missing}")
 
@@ -158,15 +156,10 @@ def decide_promotion(duels: pd.DataFrame, *, minimum_races: int = 3) -> Promotio
     finite = np.isfinite([delta_pairwise, delta_teammate, delta_mae]).all()
     no_regression = finite and delta_pairwise >= 0.0 and delta_teammate >= 0.0 and delta_mae <= 0.0
     improved = delta_pairwise > 0.0 or delta_teammate > 0.0 or delta_mae < 0.0
-    enough_evidence = len(duels) >= minimum_races
-    promote = bool(enough_evidence and no_regression and improved)
+    promote = bool(no_regression and improved)
     reason = (
         "migliora almeno una metrica senza regressioni ranker"
         if promote
-        else (
-            f"servono almeno {minimum_races} gare appaiate"
-            if not enough_evidence
-            else "regressione o assenza di miglioramento nella scorecard ranker"
-        )
+        else "regressione o assenza di miglioramento nella scorecard ranker"
     )
     return PromotionDecision(promote, delta_pairwise, delta_teammate, delta_mae, reason)

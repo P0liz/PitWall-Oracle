@@ -135,6 +135,7 @@ class StaticTraining(Training):
             self.test_df["circuit_id"], categories=self.train_df["circuit_id"].cat.categories
         )
         print("Dati pronti nel Paddock.")
+        return self.train_df, self.test_df
 
     def train(self):
         if self.train_df is None:
@@ -205,10 +206,12 @@ class DynamicTraining(Training):
             max_depth=4,
         )
 
-    async def prepare_data(self, last_date, is_dynamic: bool = True, force: bool = False):
+    async def prepare_data(self, static_df: pd.DataFrame, last_date, is_dynamic: bool = True, force: bool = False):
         """Metodo esplicito: i dati vengono caricati solo quando chiami questo metodo."""
         print("Inizio Ingestion dati F1...")
-        self.train_df, self.test_df = await self.data_loader.load_data(last_date, is_dynamic=is_dynamic, force=force)
+        self.train_df, self.test_df = await self.data_loader.load_data(
+            last_date, static_df, is_dynamic=is_dynamic, force=force
+        )
         print("Dati pronti nel Paddock.")
 
     def train(self):

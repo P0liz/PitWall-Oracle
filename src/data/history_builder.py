@@ -42,7 +42,8 @@ class HistoryBuilder:
         session: int,
         quali_results: pd.DataFrame,
         race_results: pd.DataFrame,
-        race_laps: pd.DataFrame,
+        raw_race_laps: pd.DataFrame,
+        clean_race_laps: pd.DataFrame,
         circuit_location: str,
         race_date,
         force: bool = False,
@@ -74,7 +75,8 @@ class HistoryBuilder:
         new_history_rows = self.build_history_rows(
             quali_results=quali_results,
             race_results=race_results,
-            race_laps=race_laps,
+            raw_race_laps=raw_race_laps,
+            clean_race_laps=clean_race_laps,
             pit_stops=pit_stops,
             race_number=race_number,
             session=session,
@@ -97,7 +99,8 @@ class HistoryBuilder:
         self,
         quali_results: pd.DataFrame,
         race_results: pd.DataFrame,
-        race_laps: pd.DataFrame,
+        raw_race_laps: pd.DataFrame,
+        clean_race_laps: pd.DataFrame,
         pit_stops: pd.DataFrame | None,
         race_number: str,
         session: int,
@@ -108,7 +111,8 @@ class HistoryBuilder:
         rows = []
         team_pit_metrics = compute_team_pit_metrics(pit_stops)
         for _, race_row in race_results.iterrows():
-            driver_id = build_driver_id(race_row["Abbreviation"], race_row["FirstName"], race_row["LastName"])
+            abbreviation = race_row["Abbreviation"]
+            driver_id = build_driver_id(abbreviation, race_row["FirstName"], race_row["LastName"])
             team_id = map_team_id(race_row["TeamName"])
             quali_row = quali_results.loc[quali_results["driver_id"] == driver_id]
             quali_position = (
@@ -128,22 +132,22 @@ class HistoryBuilder:
             if (
                 is_race_dnf(status)
                 or pd.isna(position)
-                or got_end_penalty(race_row["Abbreviation"], race_laps, race_results)
+                or got_end_penalty(abbreviation, raw_race_laps, race_results)
                 or status in POST_RACE_EXCLUSION_STATUSES
             ):
                 position = np.nan  # esclusa, non "ultimo posto"
 
-            # super_time = float(race_laps.loc[race_laps["Driver"] == race_row["Abbreviation"], "LapTime"].dt.total_seconds().min())
+            # super_time = float(race_laps.loc[race_laps["Driver"] == abbreviation, "LapTime"].dt.total_seconds().min())
             quali_time = get_driver_fastest_quali_time(quali_results, driver_id)
 
             race_pace = (
-                race_laps.loc[race_laps["Driver"] == race_row["Abbreviation"], "LapTime"].dt.total_seconds().mean()
-                if not race_laps.empty
+                clean_race_laps.loc[clean_race_laps["Driver"] == abbreviation, "LapTime"].mean()
+                if not clean_race_laps.empty
                 else np.nan
             )
 
-            lap_1_position = race_laps.loc[
-                (race_laps["Driver"] == race_row["Abbreviation"]) & (race_laps["LapNumber"] == 1), "Position"
+            lap_1_position = raw_race_laps.loc[
+                (raw_race_laps["Driver"] == abbreviation) & (raw_race_laps["LapNumber"] == 1), "Position"
             ]
 
             rain_probability = self.feature_engineer.get_rain_probability(

@@ -16,6 +16,7 @@ MANDATORY_FEATURES: tuple[str, ...] = (
 # combo pace: tutte insieme funzionano ma singolarmente no
 # ma la cosa strana è che comunque non migliorano il modello senza race pace features...
 OPTIONAL_FEATURES: tuple[str, ...] = (
+    "teammate_delta_grid_position",
     "degradation_rate",
     "teammate_delta_deg",
     "practice_position",  # combo pace
@@ -23,15 +24,19 @@ OPTIONAL_FEATURES: tuple[str, ...] = (
     "late_stint_dropoff",  # combo pace
     "team_race_pace",  # combo pace
     "teammate_delta_pace",
+    "teammate_recent_race_h2h",
     "teammate_delta_race_form",
     "driver_consistency",
+    "teammate_delta_consistency",
     "team_current_form",
     "quali_current_form",
+    "teammate_recent_quali_h2h",
     "avg_positions_gained",
     "teammate_delta_pos_gained",
     "lap1_avg_pos_gained",
     "teammate_delta_lap1_pos_gained",
     "driver_recent_race_pace",
+    "teammate_delta_recent_pace",
     "overtaking_difficulty",
     "team_track_affinity",
     "team_development",
@@ -51,30 +56,39 @@ ALL_RANKER_FEATURES: tuple[str, ...] = MANDATORY_FEATURES + OPTIONAL_FEATURES
 # The order matches the current champion models so existing artifacts remain a
 # valid comparison baseline during the migration away from feature selection.
 
-# bho per qualche ragione nulla sembra migliorare questa config
-# che non è comunque abbastanza efficace
-# da provare a metterle tutte e toglierne un pò alla volta
 PRODUCTION_FEATURES: tuple[str, ...] = (
-    "year",
-    "driver_id",
+    "grid_position",
+    "teammate_delta_grid_position",
+    "quali_pace",
+    "teammate_delta_quali",
     "team_id",
+    "driver_id",
     "circuit_id",
+    "driver_current_form",
+    "teammate_delta_race_form",
+    "forecast_rain_probability",
+    "driver_track_affinity",
+    "wet_affinity",
+    "year",
+    "regulation_era",
     "degradation_rate",
     "teammate_delta_deg",
-    "quali_pace",
-    "grid_position",
-    "teammate_delta_quali",
-    "driver_track_affinity",
-    "driver_current_form",
+    "practice_position",
+    "mean_race_pace",
+    "late_stint_dropoff",
+    "team_race_pace",
+    "teammate_delta_pace",
+    "driver_consistency",
+    "quali_current_form",
     "avg_positions_gained",
     "teammate_delta_pos_gained",
     "lap1_avg_pos_gained",
     "teammate_delta_lap1_pos_gained",
-    "overtaking_difficulty",
+    "driver_recent_race_pace",
+    "teammate_delta_recent_pace",
     "team_development",
-    "wet_affinity",
-    "forecast_rain_probability",
-    "regulation_era",
+    "team_strategy_aggressiveness_score",
+    "teammate_delta_wet_affinity",
 )
 
 

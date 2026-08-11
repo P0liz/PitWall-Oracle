@@ -1,6 +1,6 @@
 import fastf1
 import pandas as pd
-from src.utils import setup_custom_logger, get_session_mapping
+from src.utils import setup_custom_logger, get_session_mapping, normalize_utc_timestamp
 from src.data.gold_layer import GoldLayer
 from src.config import STARTING_YEAR, STATIC_ENDING_YEAR, NEW_YEAR
 import datetime
@@ -38,26 +38,38 @@ class DataLoader:
         self.circuit_dtype = pd.CategoricalDtype(categories=categories, ordered=False)
 
     # Single access point to the data
-    async def load_data(self, last_date: datetime = None, is_dynamic: bool = True, force=False):
+    async def load_data(
+        self, last_date: datetime = None, static_df: pd.DataFrame = None, is_dynamic: bool = False, force=False
+    ):
         train_filename = self.data_dir / "train_df.parquet"
         test_filename = self.data_dir / "test_df.parquet"
         dnf_filename = self.data_dir / "dnf_df.parquet"
-        if train_filename.exists() and test_filename.exists() and dnf_filename.exists() and not force:
-            self.log.info(f"Loading data from parquet files...")
+
+        if is_dynamic:
+            if static_df is None:
+                raise ValueError("I dati statici sono necessari per il training dinamico")
+            if last_date is None:
+                raise ValueError("Il cutoff temporale è necessario per il training dinamico")
+            self.log.info("Building dynamic data through cutoff...")
+            self.train_df, self.test_df = await self.build_dynamic_data(static_df, last_date, force)
+            return self.train_df, self.test_df
+
+        cache_exists = train_filename.exists() and test_filename.exists() and dnf_filename.exists()
+        if cache_exists and not force:
+            self.log.info("Loading static data from parquet files...")
             self.train_df = pd.read_parquet(train_filename)
             self.test_df = pd.read_parquet(test_filename)
             self.dnf_df = pd.read_parquet(dnf_filename)
         else:
-            self.log.info(f"Building data from scratch...")
-            self.train_df, self.test_df = await self.build_data(last_date, force)
-            # Store dataframes as parquet for future use
-            self.train_df.to_parquet(self.data_dir / "train_df.parquet", index=False)
-            if not is_dynamic:
-                self.test_df.to_parquet(self.data_dir / "test_df.parquet", index=False)
+            self.log.info("Building static data from scratch...")
+            self.train_df, self.test_df = await self.build_static_data(force)
+            self.train_df.to_parquet(train_filename, index=False)
+            self.test_df.to_parquet(test_filename, index=False)
+            self.dnf_df.to_parquet(dnf_filename, index=False)
 
         return self.train_df, self.test_df
 
-    async def build_data(self, last_date: datetime = None, force=False):
+    async def build_static_data(self, force=False):
         # 1. Build precedent history
         self._build_history(STARTING_YEAR - 1, force)
 
@@ -70,28 +82,54 @@ class DataLoader:
             self.log.info(f"Building features for {year} season...")
             for i in range(1, n_races + 1):
                 results = self.gold.build_features(year, i, force)
-                if last_date is not None:  # dynamic training: no need for test set
-                    is_test = False
-                else:  # static training: last year latest races are test set
-                    is_test = year == STATIC_ENDING_YEAR and i > n_races - TEST_SET_DIM
+                is_test = year == STATIC_ENDING_YEAR and i > n_races - TEST_SET_DIM
                 for race_df in results:
                     all_races.append(race_df)
                     race_is_test.append(is_test)
 
-        # 2.1. Build features for current year
-        if last_date is not None:
-            self.log.info(f"Building features for {NEW_YEAR} season...")
-            schedule = fastf1.get_event_schedule(NEW_YEAR)
-            n_races = schedule.loc[schedule["Session5DateUtc"] <= last_date, "Session5DateUtc"].count()
-            for i in range(1, n_races + 1):
-                results = self.gold.build_features(NEW_YEAR, i, force)
-                for race_df in results:
-                    all_races.append(race_df)
-                    race_is_test.append(False)
+        # 3. Apply target encoding to the data and save
+        self._apply_encoding(all_races, race_is_test)
 
-        # 3. Apply target encoding
-        # Encoding is applied for every single race separately,
-        # so that there is no leakage between "past" and "future" races
+        return self.train_df, self.test_df
+
+    # The call of this function is assumed after the build_static_data method
+    # Which means that the history and the static data is already built
+    async def build_dynamic_data(self, static_df: pd.DataFrame, last_date: datetime = None, force: bool = False):
+        if static_df is None:
+            self.log.error("Static data is required for dynamic training")
+            raise ValueError("I dati statici sono necessari per il training dinamico")
+        cutoff_date = normalize_utc_timestamp(last_date, "last_date")
+
+        # Build features for current year
+        races, race_is_test = [], []
+        self.log.info(f"Building features for {NEW_YEAR} season...")
+        schedule = fastf1.get_event_schedule(NEW_YEAR)
+        schedule_dates = pd.to_datetime(schedule["Session5DateUtc"], errors="coerce", utc=True)
+        n_races = schedule_dates.loc[schedule_dates <= cutoff_date].count()
+        for i in range(1, n_races + 1):
+            results = self.gold.build_features(NEW_YEAR, i, force)
+            for race_df in results:
+                races.append(race_df)
+                # Dynamic training uses all races so no test set
+                race_is_test.append(False)
+
+        # 3. Apply target encoding to the data and save
+        self._apply_encoding(races, race_is_test, static_df)
+
+        # Validate that the dynamic dataset is correct (no future dates to avoid data leakage)
+        race_dates = pd.to_datetime(self.train_df["race_date"], errors="coerce", utc=True, format="mixed")
+        if race_dates.isna().any() or (race_dates > cutoff_date).any():
+            self.log.error("Dynamic dataset contains invalid or future dates")
+            raise ValueError("Il dataset dinamico contiene date non valide o successive al cutoff")
+
+        return self.train_df, self.test_df
+
+    def _apply_encoding(self, all_races, race_is_test, static_df: pd.DataFrame = None):
+        """
+        Apply target encoding
+        Encoding is applied for every single race separately,
+        so that there is no leakage between "past" and "future" races
+        """
         self.history_df = self.history_builder.get_history()
         train_parts, test_parts, dnf_parts = [], [], []
         assert len(all_races) == len(
@@ -112,6 +150,11 @@ class DataLoader:
         if train_parts:
             self.train_df = pd.concat(train_parts, ignore_index=True)
             self.train_df = self.train_df.dropna(subset=["target"])
+            # Adding dynamic data to precomputed static data in dynamic data building
+            if static_df is not None:
+                self.train_df = pd.concat([static_df, self.train_df], ignore_index=True)
+        elif static_df is not None:
+            self.train_df = static_df.copy()
         else:
             self.train_df = pd.DataFrame()
 
@@ -134,11 +177,6 @@ class DataLoader:
         if not self.test_df.empty:
             self.test_df["circuit_id"] = self.test_df["circuit_id"].astype(self.circuit_dtype)
 
-        # Store for future use
-        self.dnf_df.to_parquet(self.data_dir / "dnf_df.parquet", index=False)
-
-        return self.train_df, self.test_df
-
     def _build_history(self, year: int, force: bool = False):
         pre_schedule = fastf1.get_event_schedule(year)
         pre_n_races = pre_schedule["RoundNumber"].max()
@@ -150,7 +188,8 @@ class DataLoader:
             if event["EventFormat"].iloc[0] != "conventional":
                 self._build_history_session(year, False, "sr", force, i, event)
                 self._build_history_session(year, False, "gp", force, i, event)
-            self._build_history_session(year, True, "gp", force, i, event)
+            else:
+                self._build_history_session(year, True, "gp", force, i, event)
 
     def _build_history_session(
         self, year, is_conventional, race_type: str, force: bool, race_number: int, event: pd.DataFrame
@@ -163,11 +202,21 @@ class DataLoader:
         race_session = get_session_mapping(year, is_conventional, race_type, "race")
         race_date = event[f"Session{race_session}Date"].iloc[0]
         race_results = self.gold.silver.get_clean_results(year, race_number, race_session, force)
-        race_laps = self.gold.silver.get_untouched_laps(year, race_number, race_session, force)
+        raw_race_laps = self.gold.silver.get_untouched_laps(year, race_number, race_session, force)
+        clean_race_laps = self.gold.silver.get_clean_laps(year, race_number, race_session, force)
         if hasattr(race_date, "tzinfo") and race_date.tzinfo is not None:
             race_date = race_date.tz_convert("UTC").tz_localize(None)
         self.history_builder.update_history(
-            year, race_number, race_session, quali_results, race_results, race_laps, location, race_date, force=force
+            year,
+            race_number,
+            race_session,
+            quali_results,
+            race_results,
+            raw_race_laps,
+            clean_race_laps,
+            location,
+            race_date,
+            force=force,
         )
 
     # Target Encoding: useful for the model to know the general strength of a driver/team

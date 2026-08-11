@@ -11,15 +11,13 @@ COMPONENTS_PENALTY_THRESHOLD = 3
 WET_WEATHER_THRESHOLD = 0.3
 
 # Optimized training
-DEFAULT_DECAY_RATE = 0.005
+RANKER_OPTUNA_TRIALS = 15
+DEFAULT_DECAY_RATE = 0.0006189898976496755
 TIME_PENALTY_THRESHOLD = 2
 TOLLERANCE = 0.003
+TARGET_MULTIPLIER = 2
 
-# Optimized dnf
-DEFAULT_C_VALUES = (0.0001, 0.001, 0.003, 0.01, 0.1, 1.0, 10.0, 100.0)
-DEFAULT_CLASS_WEIGHTS = (None, "balanced")
-
-to_log = {
+to_log_ranker = {
     "min_valid_laps": MIN_VALID_LAPS,
     "min_dev_races": MIN_DEV_RACES,
     "rolling_dnf_window": ROLLING_DNF_WINDOW,
@@ -27,12 +25,19 @@ to_log = {
     "consistency_window": CONSISTENCY_WINDOW,
     "components_penalty_threshold": COMPONENTS_PENALTY_THRESHOLD,
     "wet_weather_threshold": WET_WEATHER_THRESHOLD,
+    "ranker_optuna_trials": RANKER_OPTUNA_TRIALS,
     "default_decay_rate": DEFAULT_DECAY_RATE,
     "time_penalty_threshold": TIME_PENALTY_THRESHOLD,
     "tollerance": TOLLERANCE,
-    "default_c_values": DEFAULT_C_VALUES,
-    "default_class_weights": DEFAULT_CLASS_WEIGHTS,
+    "target_multiplier": TARGET_MULTIPLIER,
 }
+
+# Optimized dnf
+DNF_OPTUNA_TRIALS = 40
+DNF_TARGET = "dnf_target"
+MAX_DNF_PROB = 0.30
+
+to_log_dnf = {"dnf_optuna_trials": 40, "dnf_target": "dnf_target", "max_dnf_prob": 0.30}
 
 STARTING_YEAR = 2024
 STATIC_ENDING_YEAR = 2025

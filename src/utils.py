@@ -69,6 +69,22 @@ def get_session_mapping(year: int, is_conventional: bool, race_type: str, data: 
     return SESSION_MAPPING.get((year, is_conventional, race_type, data), None)
 
 
+# Utilities
+def normalize_utc_timestamp(value, field_name: str) -> pd.Timestamp:
+    """Valida un timestamp scalare e lo normalizza in UTC."""
+    if value is None:
+        raise ValueError(f"{field_name} non valido")
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field_name} non valido") from error
+    if pd.isna(timestamp):
+        raise ValueError(f"{field_name} non valido")
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize("UTC")
+    return timestamp.tz_convert("UTC")
+
+
 def setup_custom_logger(name):
     # 1. Create a custom logger
     logger = logging.getLogger(name)
