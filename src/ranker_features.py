@@ -108,6 +108,11 @@ NON_FEATURE_COLUMNS: frozenset[str] = frozenset(
         "team_dnf_rate",
         "driver_dnf_rate",
         "car_age_proxy",
+        "driver_dnf_free_streak",
+        "smoothed_circuit_dnf_rate",
+        "driver_wet_dnf_risk",
+        "smoothed_driver_lap1_dnf_rate",
+        "is_sprint",
         "source_file",
     }
 )

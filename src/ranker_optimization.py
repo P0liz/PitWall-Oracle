@@ -3,7 +3,7 @@ import numpy as np
 import optuna
 from xgboost import XGBRanker
 from .config import GLOBAL_SEED
-from .trainer import make_weights
+from .ranker_model import make_weights
 from .ranking_metrics import evaluate_grouped_rankings
 
 FIXED_PARAMS = {

@@ -124,6 +124,8 @@ the user decide what to commit.
 
 ## Testing policy
 
+Tests of any kind must go inside the tests folder.
+
 This is a compact experimental ML project. Do not automatically create or run
 a broad test suite for every intermediate feature addition, screening step, or
 small pipeline phase.

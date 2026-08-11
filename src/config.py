@@ -37,7 +37,7 @@ DNF_OPTUNA_TRIALS = 40
 DNF_TARGET = "dnf_target"
 MAX_DNF_PROB = 0.30
 
-to_log_dnf = {"dnf_optuna_trials": 40, "dnf_target": "dnf_target", "max_dnf_prob": 0.30}
+to_log_dnf = {"dnf_optuna_trials": DNF_OPTUNA_TRIALS, "dnf_target": DNF_TARGET, "max_dnf_prob": MAX_DNF_PROB}
 
 STARTING_YEAR = 2024
 STATIC_ENDING_YEAR = 2025

@@ -56,43 +56,42 @@ pairwise accuracy or mean absolute position error. NDCG and top-k overlap remain
 diagnostic metrics. Sprint queries are excluded from ranker training and primary
 evaluation; DNF and Monte Carlo evaluation are separate workflows.
 
-## DNF strategies
+## DNF model and simulation
 
-The Monte Carlo simulator supports interchangeable DNF probability providers:
+`train_dnf_optimized.py` is the single DNF training and optimization workflow.
+It uses `LogisticRegression`; Optuna jointly selects the feature subset and
+hyperparameters on expanding temporal folds, followed by a separate
+out-of-sample holdout evaluation.
 
-```text
-none | global_rate | team_beta | heuristic | logistic
-```
+Optimization intentionally differs between the two models. The nonlinear
+`XGBRanker` uses a fixed production feature set because independently toggling
+30+ correlated inputs would create a very large, unstable search space; ranker
+feature changes are therefore evaluated as explicit ablation challengers on
+the same temporal folds. The DNF model is a linear logistic regression with a
+smaller candidate registry, so Optuna can reasonably treat feature inclusion
+as a boolean hyperparameter alongside regularization and class weighting.
+In both workflows, feature or parameter selection uses development folds only;
+the out-of-sample period remains separate from selection.
 
-`team_beta` is the default. It estimates constructor reliability with a
-Beta-Binomial prior, shrinking teams with little history towards the causal
-global DNF rate.
-
-Run a simulation with:
-
-```powershell
-python monte_carlo_simulator.py --year 2026 --race 10 --dnf-strategy team_beta
-```
-
-The logistic model remains available for experiments:
-
-```powershell
-python monte_carlo_simulator.py --year 2026 --race 10 --dnf-strategy logistic
-```
-
-## Ablation
-
-Evaluate the DNF probability providers:
+Train the DNF model with:
 
 ```powershell
-python evaluate_dnf_ablation.py
+.\venv\Scripts\python.exe train_dnf_optimized.py
 ```
 
-Evaluate their end-to-end effect on win, podium and points probabilities:
+The Monte Carlo simulator supports only the logistic model (the default) and
+`none`, a ranker-only control with no DNF probability model. A missing or
+incompatible logistic artifact produces an explicit error; the simulator does
+not fall back to an alternative probability method.
+
+Run the logistic simulation with:
 
 ```powershell
-python evaluate_simulator_ablation.py --year 2026
+.\venv\Scripts\python.exe monte_carlo_simulator.py --year 2026 --race 10 --dnf-strategy logistic
 ```
 
-Both commands write reproducible predictions, metrics, reliability data and
-GO/NO-GO gate results under `results/ablation`.
+Run the ranker-only control with:
+
+```powershell
+.\venv\Scripts\python.exe monte_carlo_simulator.py --year 2026 --race 10 --dnf-strategy none
+```

@@ -296,6 +296,82 @@ class FeatureEngineering:
         rate = is_dnf.ewm(span=window).mean().iloc[-1]
         return float(rate)
 
+    def compute_driver_dnf_free_streak(self, history_before: pd.DataFrame, driver_id: str) -> float:
+        driver_history = history_before.loc[history_before["driver_id"] == driver_id]
+        if driver_history.empty:
+            return np.nan
+
+        consecutive_finishes = 0
+        statuses = driver_history.sort_values("race_date", ascending=False)["status_raw"]
+        for status in statuses:
+            if is_race_dnf(status):
+                break
+            consecutive_finishes += 1
+        return float(consecutive_finishes)
+
+    def compute_smoothed_circuit_dnf_rate(
+        self, history_before: pd.DataFrame, circuit_id: str, prior_strength: float = 20.0
+    ) -> float:
+        if history_before.empty:
+            return np.nan
+
+        dnf_events = history_before["status_raw"].map(is_race_dnf).astype(float)
+        global_rate = float(dnf_events.mean())
+        circuit_mask = history_before["circuit_id"] == circuit_id
+        circuit_starts = int(circuit_mask.sum())
+        if circuit_starts == 0:
+            return global_rate
+
+        # Apply smoothing
+        circuit_dnfs = float(dnf_events.loc[circuit_mask].sum())
+        return float((circuit_dnfs + prior_strength * global_rate) / (circuit_starts + prior_strength))
+
+    def compute_driver_wet_dnf_risk(
+        self,
+        history_before: pd.DataFrame,
+        driver_id: str,
+        forecast_rain_probability: float,
+        prior_strength: float = 10.0,
+    ) -> float:
+        if pd.isna(forecast_rain_probability):
+            return np.nan
+
+        wet_history = history_before.loc[history_before["rain_probability"] > WET_WEATHER_THRESHOLD]
+        if wet_history.empty:
+            return 0.0
+
+        wet_dnf_events = wet_history["status_raw"].map(is_race_dnf).astype(float)
+        global_wet_rate = float(wet_dnf_events.mean())
+        driver_mask = wet_history["driver_id"] == driver_id
+        driver_wet_starts = int(driver_mask.sum())
+        driver_wet_dnfs = float(wet_dnf_events.loc[driver_mask].sum())
+        smoothed_driver_rate = (driver_wet_dnfs + prior_strength * global_wet_rate) / (
+            driver_wet_starts + prior_strength
+        )
+
+        # Risk is the difference between the driver's wet DNF rate and the global wet DNF rate,
+        # scaled by the probability of rain.
+        return float(forecast_rain_probability * (smoothed_driver_rate - global_wet_rate))
+
+    def compute_smoothed_driver_lap1_dnf_rate(
+        self, history_before: pd.DataFrame, driver_id: str, prior_strength: float = 20.0
+    ) -> float:
+        if history_before.empty:
+            return np.nan
+
+        is_dnf = history_before["status_raw"].map(is_race_dnf)
+        laps_completed = pd.to_numeric(history_before["laps_completed"], errors="coerce")
+        lap1_dnf_events = (is_dnf & laps_completed.le(1)).astype(float)
+        global_rate = float(lap1_dnf_events.mean())
+        driver_mask = history_before["driver_id"] == driver_id
+        driver_starts = int(driver_mask.sum())
+        if driver_starts == 0:
+            return global_rate
+
+        # Apply smoothing
+        driver_events = float(lap1_dnf_events.loc[driver_mask].sum())
+        return float((driver_events + prior_strength * global_rate) / (driver_starts + prior_strength))
+
     def compute_car_age_proxy(
         self,
         history_before: pd.DataFrame,

@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from src.config import *
+from src.dnf_features import DNF_CANDIDATE_FEATURES
 from src.utils import (
     setup_custom_logger,
     got_end_penalty,
@@ -70,7 +71,7 @@ class GoldLayer:
         if filename in os.listdir(self.data_dir) and not force:
             # Load from file
             gold_df = pd.read_parquet(self.data_dir / filename)
-            required_metadata = {"dnf_target", "raw_driver_id", "raw_team_id", "session_type"}
+            required_metadata = {"dnf_target", "raw_driver_id", "raw_team_id", "session_type", *DNF_CANDIDATE_FEATURES}
             missing_metadata = required_metadata - set(gold_df.columns)
             if missing_metadata:
                 self.log.info(f"Rigenerazione di {filename}: colonne mancanti {sorted(missing_metadata)}.")
@@ -198,6 +199,15 @@ class GoldLayer:
                 # Categoria B: causali, derivate da fatti grezzi nella history (safe, non target-derived)
                 "team_dnf_rate": self.feature_engineer.compute_team_dnf_rate(history_before, year, team_id),
                 "driver_dnf_rate": self.feature_engineer.compute_driver_dnf_rate(history_before, year, driver_id),
+                "driver_dnf_free_streak": self.feature_engineer.compute_driver_dnf_free_streak(
+                    history_before, driver_id
+                ),
+                "smoothed_circuit_dnf_rate": self.feature_engineer.compute_smoothed_circuit_dnf_rate(
+                    history_before, circuit_location
+                ),
+                "smoothed_driver_lap1_dnf_rate": (
+                    self.feature_engineer.compute_smoothed_driver_lap1_dnf_rate(history_before, driver_id)
+                ),
                 "car_age_proxy": self.feature_engineer.compute_car_age_proxy(
                     history_before, driver_id, year, quali_position, grid_position
                 ),
@@ -230,12 +240,16 @@ class GoldLayer:
                     self.feature_engineer.compute_team_strategy_aggressiveness_score(history_before, team_id)
                 ),
                 "wet_affinity": self.feature_engineer.compute_wet_affinity(history_before, driver_id),
+                "driver_wet_dnf_risk": self.feature_engineer.compute_driver_wet_dnf_risk(
+                    history_before, driver_id, rain_probability
+                ),
                 "teammate_delta_wet_affinity": np.nan,
                 # Target DNF all-cause
                 "dnf_target": np.nan,
                 # Categoria C: esterna
                 "forecast_rain_probability": rain_probability,
                 "is_street_circuit": IS_STREET_CIRCUIT[circuit_location],
+                "is_sprint": float(session != 5),
                 "regulation_era": regs_era,
             }
 

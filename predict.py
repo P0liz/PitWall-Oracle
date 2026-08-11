@@ -1,47 +1,41 @@
 from xgboost import XGBRanker
-from src.trainer import select_model_feature_frame
+
+from ranker_model import select_model_feature_frame
 from src.data.gold_layer import GoldLayer
 from src.data.data_loader import DataLoader
+from src.config import NEW_YEAR
+from src.ranker_model_loader import resolve_ranker_model_path
 
-NEW_YEAR = 2026
-PREDICT_RACE = 11  # numero gara da predire
-champion_path = "models/pitwall_oracle_2026_11.json"
-
-# Inference
-champion_model = XGBRanker()
-champion_model.load_model(champion_path)
-gold = GoldLayer()
-data_loader = DataLoader()
-
-# race_df = gold.build_prediction_features(NEW_YEAR, PREDICT_RACE, 5, force=True)
-results = gold.build_features(NEW_YEAR, PREDICT_RACE, force=True)
-race_df = results[-1]
-cutoff_date = race_df["race_date"].iloc[0]
-race_df["driver_id_raw"] = race_df["driver_id"].copy()  # salva prima dell'encoding
-for col in ["driver_id", "team_id"]:
-    race_df[col] = data_loader.apply_target_encoding(race_df, col, cutoff_date=cutoff_date)
-race_df["circuit_id"] = race_df["circuit_id"].astype(data_loader.circuit_dtype)
-
-X_new = select_model_feature_frame(champion_model, race_df)
-scores = champion_model.predict(X_new)
-
-predictions = race_df[["driver_id_raw"]].copy()
-predictions.columns = ["driver_id"]
-predictions["score"] = scores
-print(predictions.sort_values("score", ascending=False).reset_index(drop=True))
-
-"""
-predictions["actual_position"] = (race_df["target"].max() - race_df["target"] + 1).values
-predictions["predicted_position"] = predictions["score"].rank(ascending=False).astype(int)
+PREDICT_RACE = 9  # numero gara da predire
 
 
-def topn_exact_accuracy(n):
-    top_n = predictions.nsmallest(n, "actual_position")
-    correct = (top_n["predicted_position"].values == top_n["actual_position"].values).sum()
-    return correct / n
+def main():
+    champion_path = resolve_ranker_model_path(NEW_YEAR, PREDICT_RACE)
+    if not champion_path.exists():
+        raise FileNotFoundError(f"Modello Ranker non trovato in '{champion_path}'")
+
+    champion_model = XGBRanker()
+    champion_model.load_model(champion_path)
+    gold = GoldLayer()
+    data_loader = DataLoader()
+
+    # race_df = gold.build_prediction_features(NEW_YEAR, PREDICT_RACE, 5, force=True)
+    results = gold.build_features(NEW_YEAR, PREDICT_RACE, force=True)
+    race_df = results[-1]
+    cutoff_date = race_df["race_date"].iloc[0]
+    race_df["driver_id_raw"] = race_df["driver_id"].copy()  # salva prima dell'encoding
+    for col in ["driver_id", "team_id"]:
+        race_df[col] = data_loader.apply_target_encoding(race_df, col, cutoff_date=cutoff_date)
+    race_df["circuit_id"] = race_df["circuit_id"].astype(data_loader.circuit_dtype)
+
+    X_new = select_model_feature_frame(champion_model, race_df)
+    scores = champion_model.predict(X_new)
+
+    predictions = race_df[["driver_id_raw"]].copy()
+    predictions.columns = ["driver_id"]
+    predictions["score"] = scores
+    print(predictions.sort_values("score", ascending=False).reset_index(drop=True))
 
 
-print(f"Podio exact accuracy: {topn_exact_accuracy(3):.0%}")
-for n in [5, 10, 20]:
-    print(f"Top-{n} exact accuracy: {topn_exact_accuracy(n):.0%}")
-"""
+if __name__ == "__main__":
+    main()

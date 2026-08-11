@@ -1,6 +1,6 @@
 from src.data.gold_layer import GoldLayer
-from src.trainer import DynamicTraining, StaticTraining, select_model_feature_frame
-from src.model_optimization import FIXED_PARAMS, run_hpo_optuna
+from ranker_model import DynamicTraining, StaticTraining, select_model_feature_frame
+from ranker_optimization import FIXED_PARAMS, run_hpo_optuna
 from src.data.data_loader import DataLoader, NEW_YEAR, CATEGORICAL_COLS
 from src.config import DEFAULT_DECAY_RATE, to_log_ranker, TARGET_MULTIPLIER, RANKER_OPTUNA_TRIALS
 from src.ranker_features import PRODUCTION_FEATURES
@@ -117,6 +117,9 @@ def run_pipeline():
         races = new_schedule.loc[new_schedule["Session5DateUtc"] <= pd.Timestamp.now(), "Session5DateUtc"]
 
         trainer_dynamic.log.info("Inizio testing su gare dinamiche...")
+        # Challenger set to None so that first iteration is only for base_model evaluation
+        # In the next iterations we train the challenger on race n-1
+        # and make the promotion decision on race n
         challenger = None
         champion_history: list[dict[str, float]] = []
         for idx, date in enumerate(races):
