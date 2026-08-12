@@ -226,4 +226,3 @@ mlflow.db
 data_files/
 results/
 docs/
-tests/

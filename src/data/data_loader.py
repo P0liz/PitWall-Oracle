@@ -3,6 +3,7 @@ import pandas as pd
 from src.utils import setup_custom_logger, get_session_mapping, normalize_utc_timestamp
 from src.data.gold_layer import GoldLayer
 from src.config import STARTING_YEAR, STATIC_ENDING_YEAR, NEW_YEAR
+from src.dnf_features import DNF_CANDIDATE_FEATURES
 import datetime
 from pathlib import Path
 
@@ -55,12 +56,16 @@ class DataLoader:
             return self.train_df, self.test_df
 
         cache_exists = train_filename.exists() and test_filename.exists() and dnf_filename.exists()
+        cache_is_valid = False
         if cache_exists and not force:
             self.log.info("Loading static data from parquet files...")
             self.train_df = pd.read_parquet(train_filename)
             self.test_df = pd.read_parquet(test_filename)
             self.dnf_df = pd.read_parquet(dnf_filename)
-        else:
+            required_dnf_columns = {"race_date", "dnf_target", *DNF_CANDIDATE_FEATURES}
+            cache_is_valid = required_dnf_columns.issubset(self.dnf_df.columns)
+
+        if force or not cache_is_valid:
             self.log.info("Building static data from scratch...")
             self.train_df, self.test_df = await self.build_static_data(force)
             self.train_df.to_parquet(train_filename, index=False)

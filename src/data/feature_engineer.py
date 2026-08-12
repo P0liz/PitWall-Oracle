@@ -4,6 +4,7 @@ from sklearn.linear_model import HuberRegressor
 from src.config import *
 from src.utils import get_driver_fastest_quali_time, setup_custom_logger, is_race_dnf
 
+# TODO: aggiungere test per le features più complesse?
 """
 Possibili features da inserire in futuro (in caso manchino dati)
 In generale evitare di mettere "team features" che ripetano quelle già presenti sul driver

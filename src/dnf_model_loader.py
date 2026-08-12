@@ -26,7 +26,7 @@ def dnf_artifact_candidates(artifact_paths: Iterable[str], year: int, race_numbe
             base_path = artifact_path
             continue
         match = promoted_pattern.fullmatch(artifact_name)
-        if match and int(match.group(1)) <= race_number:
+        if match and int(match.group(1)) < race_number:
             promoted.append((int(match.group(1)), artifact_path))
 
     candidates = [artifact_path for _, artifact_path in sorted(promoted, reverse=True)]
@@ -94,11 +94,7 @@ def resolve_dnf_model_path(
         for artifact_path in candidates:
             try:
                 return Path(
-                    client.download_artifacts(
-                        latest_run.info.run_id,
-                        artifact_path,
-                        dst_path=str(run_cache_dir),
-                    )
+                    client.download_artifacts(latest_run.info.run_id, artifact_path, dst_path=str(run_cache_dir))
                 )
             except Exception as error:
                 download_errors.append(f"{artifact_path}: {error}")
@@ -106,7 +102,12 @@ def resolve_dnf_model_path(
         raise RuntimeError("; ".join(download_errors))
     except Exception as error:
         local_model_dir = Path(local_model_dir)
-        fallback = local_model_dir / BASE_MODEL_PATH.name
+        local_artifacts = [
+            local_model_dir / BASE_MODEL_PATH.name,
+            *local_model_dir.glob(f"dnf_logistic_{year}_*.joblib"),
+        ]
+        selected = select_dnf_artifact_path([str(path) for path in local_artifacts if path.exists()], year, race_number)
+        fallback = Path(selected) if selected is not None else local_model_dir / BASE_MODEL_PATH.name
         warnings.warn(
             f"MLflow non disponibile o senza artefatti DNF utilizzabili per {year} gara {race_number} "
             f"({error}). Uso il modello locale '{fallback}'.",
