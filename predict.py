@@ -1,6 +1,6 @@
 from xgboost import XGBRanker
 
-from ranker_model import select_model_feature_frame
+from src.ranker_model import select_model_feature_frame
 from src.data.gold_layer import GoldLayer
 from src.data.data_loader import DataLoader
 from src.config import NEW_YEAR

@@ -1,6 +1,6 @@
 from src.data.gold_layer import GoldLayer
-from ranker_model import DynamicTraining, StaticTraining, select_model_feature_frame
-from ranker_optimization import FIXED_PARAMS, run_hpo_optuna
+from src.ranker_model import DynamicTraining, StaticTraining, select_model_feature_frame
+from src.ranker_optimization import FIXED_PARAMS, run_hpo_optuna
 from src.data.data_loader import DataLoader, NEW_YEAR, CATEGORICAL_COLS
 from src.config import DEFAULT_DECAY_RATE, to_log_ranker, TARGET_MULTIPLIER, RANKER_OPTUNA_TRIALS
 from src.ranker_features import PRODUCTION_FEATURES
@@ -22,6 +22,32 @@ LATEST_MODEL = "pitwall_oracle_latest.json"
 PENDING_MODEL = "pitwall_oracle_pending.json"
 FORCE = False
 RUN_HPO = False
+
+
+def zscore_within_race(values: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """Standardizza un vettore entro una gara; per vettori costanti restituisce zeri."""
+    values = np.asarray(values, dtype=np.float64)
+    mean = np.mean(values)
+    std = np.std(values, ddof=0)
+    if not np.isfinite(std) or std < eps:
+        return np.zeros_like(values, dtype=np.float64)
+    return (values - mean) / std
+
+
+def compute_sigma_calibration_statistics(
+    relative_residuals_by_race: list[np.ndarray], score_spreads: list[float]
+) -> dict[str, float]:
+    """Calcola le statistiche correnti della calibrazione Monte Carlo OOS."""
+    if not relative_residuals_by_race or not score_spreads:
+        raise ValueError("La calibrazione sigma richiede almeno una gara out-of-sample")
+    cumulative_residuals = np.concatenate(relative_residuals_by_race)
+    return {
+        "race_sigma_relative": float(np.std(relative_residuals_by_race[-1], ddof=0)),
+        "cumulative_sigma_relative": float(np.std(cumulative_residuals, ddof=0)),
+        "race_score_std": float(score_spreads[-1]),
+        "mean_score_std": float(np.mean(score_spreads)),
+        "median_score_std": float(np.median(score_spreads)),
+    }
 
 
 def run_pipeline():
@@ -122,6 +148,8 @@ def run_pipeline():
         # and make the promotion decision on race n
         challenger = None
         champion_history: list[dict[str, float]] = []
+        oos_relative_residuals: list[np.ndarray] = []
+        race_score_spreads: list[float] = []
         for idx, date in enumerate(races):
             race_idx = idx + 1
             trainer_dynamic.log.info(f"Elaborazione gara del {date.date()}")
@@ -168,6 +196,24 @@ def run_pipeline():
                 f"[{NEW_YEAR}_{race_idx}] pairwise={champion_metrics['pairwise_accuracy']:.4f} | "
                 f"teammate={champion_metrics['teammate_pairwise_accuracy']:.4f} | "
                 f"position_mae={champion_metrics['position_mae']:.3f}"
+            )
+
+            # Calibrazione causale del rumore Monte Carlo: ogni residuo deriva
+            # dalla previsione OOS del Champion disponibile prima del GP.
+            target_values = race_df["target"].to_numpy(dtype=np.float64)
+            relative_residuals = zscore_within_race(scores_champion) - zscore_within_race(target_values)
+            oos_relative_residuals.append(relative_residuals)
+            race_score_spreads.append(float(np.std(scores_champion, ddof=0)))
+            sigma_statistics = compute_sigma_calibration_statistics(oos_relative_residuals, race_score_spreads)
+
+            mlflow.log_metric("race_sigma_relativo", sigma_statistics["race_sigma_relative"], step=race_idx)
+            mlflow.log_metric("cumulative_sigma_relativo", sigma_statistics["cumulative_sigma_relative"], step=race_idx)
+            mlflow.log_metric("race_score_std", sigma_statistics["race_score_std"], step=race_idx)
+            trainer_dynamic.log.info(
+                f"[{NEW_YEAR}_{race_idx}] "
+                f"sigma relativo={sigma_statistics['race_sigma_relative']:.4f} | "
+                f"sigma relativo cumulativo={sigma_statistics['cumulative_sigma_relative']:.4f} | "
+                f"score std={sigma_statistics['race_score_std']:.4f}"
             )
 
             if challenger is not None:
@@ -232,6 +278,17 @@ def run_pipeline():
         published_champion.save_model(latest_path)
         mlflow.log_artifact(str(latest_path), artifact_path="models")
         trainer_dynamic.log.info(f"Champion pubblicato in {latest_path}")
+
+        if not oos_relative_residuals:
+            raise RuntimeError("Impossibile calibrare il sigma: nessun residuo out-of-sample raccolto")
+        final_sigma_statistics = compute_sigma_calibration_statistics(oos_relative_residuals, race_score_spreads)
+        mlflow.log_metric("final_sigma_relativo_empirico", final_sigma_statistics["cumulative_sigma_relative"])
+        trainer_dynamic.log.info(
+            "Calibrazione Monte Carlo completata. "
+            f"Sigma relativo empirico: {final_sigma_statistics['cumulative_sigma_relative']:.4f} | "
+            f"score std medio: {final_sigma_statistics['mean_score_std']:.4f} | "
+            f"score std mediano: {final_sigma_statistics['median_score_std']:.4f}"
+        )
 
 
 if __name__ == "__main__":
