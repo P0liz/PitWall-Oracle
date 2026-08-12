@@ -8,14 +8,15 @@ from xgboost import XGBRanker
 
 from src.data.data_loader import DataLoader
 from src.data.gold_layer import GoldLayer
-from src.trainer import select_model_feature_frame
-from src.dnf_model import (
-    DNF_STRATEGIES,
-    DEFAULT_DNF_STRATEGY,
-    compute_heuristic_dnf_probabilities,
-    compute_strategy_probabilities,
-    ensure_dnf_target,
-    load_dnf_artifact,
+from src.dnf_model_loader import resolve_dnf_model_path
+from src.ranker_model import select_model_feature_frame
+from src.dnf_model import compute_probabilities, load_dnf_artifact, normalize_utc_timestamp
+from src.ranker_model_loader import (
+    BASE_MODEL_PATH,
+    MLFLOW_CACHE_DIR,
+    MLFLOW_TRACKING_URI,
+    RANKING_EXPERIMENT,
+    resolve_ranker_model_path,
 )
 from src.utils import setup_custom_logger
 
@@ -25,11 +26,7 @@ log = setup_custom_logger("MonteCarloSimulator")
 PREDICTION_MODE = False
 
 MODEL_DIR = Path("models")
-BASE_MODEL_PATH = MODEL_DIR / "pitwall_oracle_base.json"
-MLFLOW_CACHE_DIR = Path("data_files") / "mlflow_artifacts"
-RANKING_EXPERIMENT = "PitWall_Oracle_Ranking"
 DNF_EXPERIMENT = "PitWall_Oracle_DNF"
-MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"  # stesso backend store usato da ml_flow_auto.py
 
 N_SIMULATIONS = 10000
 ORDER_BY = "expected_position_if_finished"  # or "expected_position" "expected_position_if_finished"
@@ -108,47 +105,22 @@ def fetch_relative_sigma(year: int, race_number: int) -> float:
         return FALLBACK_SIGMA_RELATIVE
 
 
-def model_path_for_race(year: int, race_number: int) -> Path:
-    """Seleziona il modello addestrato con dati fino alla gara precedente."""
-    if race_number < 1:
-        raise ValueError("race_number deve essere maggiore o uguale a 1")
-    if not PREDICTION_MODE:
-        local_path = BASE_MODEL_PATH if race_number == 1 else MODEL_DIR / f"pitwall_oracle_{year}_{race_number}.json"
-    else:
-        local_path = MODEL_DIR / "pitwall_oracle_latest.json"
-    print(f"Loading ranker {local_path.name}")
-    return resolve_mlflow_artifact(
-        experiment_name=RANKING_EXPERIMENT,
-        year=year,
-        artifact_path=f"models/{local_path.name}",
-        local_fallback=local_path,
+def model_path_for_race(
+    year: int, race_number: int, client=None, cache_dir: Path = MLFLOW_CACHE_DIR, local_base: Path = BASE_MODEL_PATH
+) -> Path:
+    """Usa la policy Ranker condivisa con predict.py."""
+    return resolve_ranker_model_path(
+        year=year, race_number=race_number, client=client, cache_dir=cache_dir, local_base=local_base
     )
 
 
-def resolve_mlflow_artifact(experiment_name: str, year: int, artifact_path: str, local_fallback: Path) -> Path:
-    """Scarica l'artefatto dalla run stagionale; usa il locale solo come fallback."""
-    try:
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        client = mlflow.tracking.MlflowClient()
-        experiment = client.get_experiment_by_name(experiment_name)
-        if experiment is None:
-            raise ValueError(f"Esperimento '{experiment_name}' non trovato")
-
-        MLFLOW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        for run in _runs_for_year(client, experiment.experiment_id, year):
-            try:
-                downloaded = client.download_artifacts(run.info.run_id, artifact_path, dst_path=str(MLFLOW_CACHE_DIR))
-                path = Path(downloaded)
-                log.info(
-                    f"Artefatto MLflow recuperato da '{experiment_name}', " f"run {run.info.run_id}: {artifact_path}"
-                )
-                return path
-            except Exception:
-                continue
-    except Exception as error:
-        log.warning(f"Recupero MLflow fallito in '{experiment_name}' per '{artifact_path}': {error}")
-
-    return local_fallback
+def dnf_model_path_for_race(
+    year: int, race_number: int, client=None, cache_dir: Path = MLFLOW_CACHE_DIR, local_model_dir: Path = MODEL_DIR
+) -> Path:
+    """Usa per il DNF la stessa policy temporale e di run del Ranker."""
+    return resolve_dnf_model_path(
+        year=year, race_number=race_number, client=client, cache_dir=cache_dir, local_model_dir=local_model_dir
+    )
 
 
 def compute_dnf_probabilities(
@@ -159,54 +131,33 @@ def compute_dnf_probabilities(
     history_df: pd.DataFrame | None = None,
 ) -> np.ndarray:
     """Calcola probabilità DNF pre-gara con una strategia esplicita."""
-    if strategy not in DNF_STRATEGIES:
-        raise ValueError(f"Strategia DNF non valida: '{strategy}'")
+    del history_df
+    if strategy == "none":
+        return np.zeros(len(race_df), dtype=np.float64)
+    if strategy != "logistic":
+        raise ValueError(f"Strategia DNF non supportata: '{strategy}'")
 
-    race_date = pd.Timestamp(race_df["race_date"].iloc[0])
-    causal_history = None
-    if history_df is not None:
-        causal_history = history_df.loc[pd.to_datetime(history_df["race_date"]) < race_date]
-        causal_history = ensure_dnf_target(causal_history)
-
-    model_strategies = {"logistic", "gradient_boosting"}
-    if strategy not in model_strategies:
-        probabilities = compute_strategy_probabilities(strategy, prediction_df=race_df, history_df=causal_history)
-        log.info(f"Strategia DNF '{strategy}' applicata per {year} gara {race_number}")
-        return probabilities
-
-    artifact_prefix = "dnf_logistic" if strategy == "logistic" else "dnf_gradient_boosting"
-    if not PREDICTION_MODE:
-        artifact_name = (
-            f"{artifact_prefix}_base.joblib" if race_number == 1 else f"{artifact_prefix}_{year}_{race_number}.joblib"
-        )
-    else:
-        artifact_name = f"{artifact_prefix}_latest.joblib"
-    print(f"Loading DNF model {artifact_name}")
-    artifact_path = resolve_mlflow_artifact(
-        experiment_name=DNF_EXPERIMENT,
-        year=year,
-        artifact_path=f"models/{artifact_name}",
-        local_fallback=MODEL_DIR / artifact_name,
-    )
+    race_date = normalize_utc_timestamp(race_df["race_date"].iloc[0], "race_date")
+    artifact_path = dnf_model_path_for_race(year, race_number)
+    print(f"Loading DNF model {artifact_path.name}")
     if not artifact_path.exists():
-        log.warning(f"Modello DNF pre-gara non trovato in '{artifact_path}'. Uso fallback euristico esplicito.")
-        return compute_heuristic_dnf_probabilities(race_df)
+        raise FileNotFoundError(
+            f"Modello DNF logistico non trovato in '{artifact_path}' per year={year}, race_number={race_number}"
+        )
 
     dnf_artifact = load_dnf_artifact(artifact_path)
-    expected_model_type = dnf_artifact.get("model_type", "logistic")
-    if expected_model_type != strategy:
-        raise ValueError(f"Tipo modello DNF non compatibile: artifact={expected_model_type}, richiesto={strategy}")
+    model_type = dnf_artifact.get("model_type")
+    if model_type != "logistic":
+        raise ValueError(f"Tipo modello DNF non compatibile: artifact={model_type}, richiesto=logistic")
 
-    cutoff_date = pd.Timestamp(dnf_artifact["cutoff_date"])
+    cutoff_date = normalize_utc_timestamp(dnf_artifact["cutoff_date"], "cutoff_date")
     if cutoff_date >= race_date:
         raise ValueError(
             f"Leakage temporale nel modello DNF '{artifact_path}': cutoff {cutoff_date} "
             f"non precedente alla gara {race_date}"
         )
 
-    probabilities = compute_strategy_probabilities(
-        strategy, prediction_df=race_df, history_df=causal_history, artifact=dnf_artifact
-    )
+    probabilities = compute_probabilities(prediction_df=race_df, artifact=dnf_artifact)
     log.info(f"Modello DNF caricato per {year} gara {race_number}: {artifact_path} " f"(cutoff={cutoff_date})")
     return probabilities
 
@@ -288,21 +239,10 @@ def head_to_head(driver_a: str, driver_b: str, driver_ids: np.ndarray, simulated
     pos_a = simulated_positions[:, idx_a]
     pos_b = simulated_positions[:, idx_b]
 
-    return {
-        driver_a: float((pos_a < pos_b).mean()),
-        driver_b: float((pos_b < pos_a).mean()),
-        "tie": float((pos_a == pos_b).mean()),  # atteso ~0: rumore continuo, pareggi rarissimi
-    }
+    return {driver_a: float((pos_a < pos_b).mean()), driver_b: float((pos_b < pos_a).mean())}
 
 
-def main(
-    year: int,
-    race_number: int,
-    force: bool = False,
-    dnf_strategy: str = DEFAULT_DNF_STRATEGY,
-    n_simulations: int = N_SIMULATIONS,
-    seed: int = 42,
-):
+def main(year: int, race_number: int, force: bool = False, n_simulations: int = N_SIMULATIONS, seed: int = 42):
     sigma_relative = fetch_relative_sigma(year, race_number)
     model_path = model_path_for_race(year, race_number)
 
@@ -319,16 +259,13 @@ def main(
     gold = GoldLayer()
     data_loader = DataLoader()
 
-    race_df = gold.build_prediction_features(year, race_number, 5, force=True)
-    # race_df = race_results[-1].copy()  # solo gara principale, come in predict.py
+    race_df = gold.build_prediction_features(year, race_number, 5, force=force)
 
     race_df["driver_id_raw"] = race_df["driver_id"].copy()  # salva prima del target encoding
     race_df["team_id_raw"] = race_df["team_id"].copy()
     cutoff_date = race_df["race_date"].iloc[0]
 
-    dnf_probabilities = compute_dnf_probabilities(
-        race_df, year, race_number, strategy=dnf_strategy, history_df=data_loader.history_df
-    )
+    dnf_probabilities = compute_dnf_probabilities(race_df, year, race_number)
 
     for col in ["driver_id", "team_id"]:
         race_df[col] = data_loader.apply_target_encoding(race_df, col, cutoff_date=cutoff_date)
@@ -360,7 +297,6 @@ def main(
     )
     driver_ids_raw = race_df["driver_id_raw"].to_numpy()
     summary = summarize_results(driver_ids_raw, simulated_positions, dnf_draws, scores)
-    summary["dnf_strategy"] = dnf_strategy
 
     summary_path = Path(f"results/summary_{year}_{race_number}.csv")
     summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -369,7 +305,7 @@ def main(
     pd.set_option("display.float_format", "{:.1%}".format)
     print(
         f"\n=== Simulazione Monte Carlo — {year} GP #{race_number} "
-        f"({n_simulations} run, DNF={dnf_strategy}, sigma assoluto={sigma_absolute:.4f}) ===\n"
+        f"({n_simulations} run, sigma assoluto={sigma_absolute:.4f}) ===\n"
     )
     print(summary.to_string(index=False))
     print(f"\nSummary salvato in: {summary_path.resolve()}")
@@ -385,7 +321,6 @@ if __name__ == "__main__":
     parser.add_argument("--year", type=int, default=2026)
     parser.add_argument("--race", type=int, default=11, help="Numero di gara da simulare")
     parser.add_argument("--force", action="store_true", help="Forza il refresh delle feature Gold")
-    parser.add_argument("--dnf-strategy", choices=DNF_STRATEGIES, default=DEFAULT_DNF_STRATEGY)
     parser.add_argument("--n-simulations", type=int, default=N_SIMULATIONS)
     parser.add_argument("--seed", type=int, default=2003)
     parser.add_argument("--compare-a", type=str, default=None, help="driver_id per il confronto testa a testa")
@@ -393,12 +328,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     summary, simulated_positions, driver_ids, race_df = main(
-        args.year,
-        args.race,
-        force=args.force,
-        dnf_strategy=args.dnf_strategy,
-        n_simulations=args.n_simulations,
-        seed=args.seed,
+        args.year, args.race, force=args.force, n_simulations=args.n_simulations, seed=args.seed
     )
 
     for team_id in race_df["team_id_raw"].unique():
