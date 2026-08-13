@@ -14,6 +14,7 @@ from src.utils import (
 from .silver_layer import SilverLayer
 from .history_builder import HistoryBuilder
 from .feature_engineer import FeatureEngineering
+from .starting_grid import StartingGridResolver
 
 
 class GoldLayer:
@@ -27,6 +28,7 @@ class GoldLayer:
         self.silver = SilverLayer()
         self.feature_engineer = FeatureEngineering(self.silver)
         self.history_builder = HistoryBuilder(self.silver, self.feature_engineer)
+        self.starting_grid_resolver = StartingGridResolver()
 
     # Get features to parquet: one parquet for each weekend, with one row for each driver
     # The rows are the groups used by XGBRanker to calculate the ranking
@@ -53,8 +55,17 @@ class GoldLayer:
         assert 1 <= race_number <= 24, f"Race number {race_number} does not exist: max 24 races"
         assert session in [3, 5], "Predictions only on race sessions"
         event = self.silver.get_clean_event_metadata(year, race_number, force)
+        is_conventional = event["EventFormat"].iloc[0] == "conventional"
+        race_type = "sr" if session <= 4 else "gp"
+        quali_session = get_session_mapping(year, is_conventional, race_type, "quali")
+        quali_results = self.silver.get_clean_results(year, race_number, quali_session, force)
+        resolved_grid = self.starting_grid_resolver.resolve(
+            year, race_number, session, event["EventName"].iloc[0], quali_results, force=force
+        )
 
-        results = self.get_features(event, year, race_number, session, force, prediction_mode=True)
+        results = self.get_gp_features(
+            event, year, race_number, session, force, prediction_mode=True, prediction_grid=resolved_grid.positions
+        )
         results.to_parquet(self.data_dir / f"latest_race_pred.parquet", index=False)
         return results
 
@@ -85,7 +96,14 @@ class GoldLayer:
 
     # Just calculate features and return a dataframe
     def get_gp_features(
-        self, event: pd.DataFrame, year: int, race_number: int, session: int, force: bool, prediction_mode: bool
+        self,
+        event: pd.DataFrame,
+        year: int,
+        race_number: int,
+        session: int,
+        force: bool,
+        prediction_mode: bool,
+        prediction_grid: dict[str, float] | None = None,
     ):
         # Load raw data
         silver = self.silver
@@ -164,7 +182,7 @@ class GoldLayer:
             grid_position = (
                 self.feature_engineer.get_grid_position(race_results_df, driver_id)
                 if not prediction_mode
-                else CUSTOM_GRID[driver_id]
+                else prediction_grid[driver_id]
             )
 
             row = {

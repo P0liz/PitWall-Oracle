@@ -8,7 +8,8 @@ import pandas as pd
 from src.ranking_metrics import mean_absolute_position_error, pairwise_accuracy
 
 YEAR = 2026
-RACE_NUMBER = None
+RACE_NUMBER = None  # Set to None to have full season eval
+RACE_SESSION = 5  # Set to 3 for sprint race
 
 RANKING_LABELS = {
     "base_position": "Base position",
@@ -120,32 +121,33 @@ def _display_season_summary(summary: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
-def _run_simulator(year: int, race_number: int) -> None:
+def _run_simulator(year: int, race_number: int, session: int) -> None:
     from monte_carlo_simulator import main as simulator_main
 
-    simulator_main(year, race_number)
+    simulator_main(year, race_number, session)
 
 
 def evaluate_configured_race(
     year: int,
     race_number: int,
+    session: int = RACE_SESSION,
     *,
     results_dir: Path = Path("results"),
     silver_dir: Path = Path("data_files/silver"),
     simulator: Callable[[int, int], object] = _run_simulator,
 ) -> pd.DataFrame:
-    summary_path = results_dir / f"summary_{year}_{race_number}.csv"
+    summary_path = results_dir / f"summary_{year}_{race_number}_{session}.csv"
     if not summary_path.is_file():
         print(f"Summary GP #{race_number} assente: avvio simulazione Monte Carlo.")
-        simulator(year, race_number)
-    silver_path = silver_dir / f"{year}_{race_number}_5_clean_results.parquet"
+        simulator(year, race_number, session)
+    silver_path = silver_dir / f"{year}_{race_number}_{session}_clean_results.parquet"
     metrics = evaluate_race(summary_path, silver_path)
     table = _display_race_metrics(metrics)
     results_dir.mkdir(parents=True, exist_ok=True)
-    table.to_csv(results_dir / f"evaluation_{year}_{race_number}.csv", float_format="%.4f", index=False)
+    table.to_csv(results_dir / f"evaluation_{year}_{race_number}_{session}.csv", float_format="%.4f", index=False)
 
     driver_count = int(metrics["drivers"].iloc[0])
-    print(f"\nConfronto Monte Carlo — {year} GP #{race_number} ({driver_count} piloti)\n")
+    print(f"\nConfronto Monte Carlo — {year} GP #{race_number} Session #{session} ({driver_count} piloti)\n")
     print(table.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
     return metrics
 
@@ -165,6 +167,7 @@ def completed_race_numbers(year: int, cutoff: pd.Timestamp | None = None) -> lis
 def evaluate_season(
     year: int,
     race_numbers: Sequence[int],
+    session: int = 5,
     *,
     results_dir: Path = Path("results"),
     silver_dir: Path = Path("data_files/silver"),
@@ -175,11 +178,7 @@ def evaluate_season(
     for race_number in race_numbers:
         try:
             metrics = evaluate_configured_race(
-                year,
-                race_number,
-                results_dir=results_dir,
-                silver_dir=silver_dir,
-                simulator=simulator,
+                year, race_number, session, results_dir=results_dir, silver_dir=silver_dir, simulator=simulator
             )
             metrics.insert(0, "race_number", race_number)
             evaluated.append(metrics)
@@ -224,7 +223,7 @@ def main() -> None:
 
     if not isinstance(RACE_NUMBER, int) or isinstance(RACE_NUMBER, bool) or RACE_NUMBER < 1:
         raise ValueError("RACE_NUMBER deve essere None oppure un intero positivo")
-    evaluate_configured_race(YEAR, RACE_NUMBER)
+    evaluate_configured_race(YEAR, RACE_NUMBER, RACE_SESSION)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,8 @@ from src.data.data_loader import DataLoader
 from src.config import NEW_YEAR
 from src.ranker_model_loader import resolve_ranker_model_path
 
-PREDICT_RACE = 9  # numero gara da predire
+PREDICT_RACE = 4  # numero gara da predire
+RACE_SESSION = 5
 
 
 def main():
@@ -19,9 +20,9 @@ def main():
     gold = GoldLayer()
     data_loader = DataLoader()
 
-    # race_df = gold.build_prediction_features(NEW_YEAR, PREDICT_RACE, 5, force=True)
-    results = gold.build_features(NEW_YEAR, PREDICT_RACE, force=True)
-    race_df = results[-1]
+    race_df = gold.build_prediction_features(NEW_YEAR, PREDICT_RACE, RACE_SESSION, force=False)
+    # results = gold.build_features(NEW_YEAR, PREDICT_RACE, force=True)
+    # race_df = results[-1]
     cutoff_date = race_df["race_date"].iloc[0]
     race_df["driver_id_raw"] = race_df["driver_id"].copy()  # salva prima dell'encoding
     for col in ["driver_id", "team_id"]:

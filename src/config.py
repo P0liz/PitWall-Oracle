@@ -84,32 +84,6 @@ SESSION_MAPPING = {
     (0, True, "gp", "race"): 5,
 }
 
-# Custom grid positions for latest prediction
-CUSTOM_GRID = {
-    "nor_lando_norris": 1,
-    "lec_charles_leclerc": 2,
-    "pia_oscar_piastri": 3,
-    "ver_max_verstappen": 4,
-    "ham_lewis_hamilton": 5,
-    "rus_george_russell": 6,
-    "ant_kimi_antonelli": 7,
-    "had_isack_hadjar": 8,
-    "lin_arvid_lindblad": 9,
-    "hul_nico_hulkenberg": 10,
-    "law_liam_lawson": 11,
-    "gas_pierre_gasly": 12,
-    "col_franco_colapinto": 13,
-    "bor_gabriel_bortoleto": 14,
-    "oco_esteban_ocon": 15,
-    "alo_fernando_alonso": 16,
-    "bea_oliver_bearman": 17,
-    "sai_carlos_sainz": 18,
-    "alb_alexander_albon": 19,
-    "str_lance_stroll": 20,
-    "bot_valtteri_bottas": 21,
-    "per_sergio_perez": 22,
-}
-
 TEAM_ID_MAPPING = {
     "Alfa Romeo": "audi_lineage",
     "Kick Sauber": "audi_lineage",

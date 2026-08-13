@@ -242,7 +242,9 @@ def head_to_head(driver_a: str, driver_b: str, driver_ids: np.ndarray, simulated
     return {driver_a: float((pos_a < pos_b).mean()), driver_b: float((pos_b < pos_a).mean())}
 
 
-def main(year: int, race_number: int, force: bool = False, n_simulations: int = N_SIMULATIONS, seed: int = 42):
+def main(
+    year: int, race_number: int, session: int, force: bool = False, n_simulations: int = N_SIMULATIONS, seed: int = 42
+):
     sigma_relative = fetch_relative_sigma(year, race_number)
     model_path = model_path_for_race(year, race_number)
 
@@ -259,7 +261,12 @@ def main(year: int, race_number: int, force: bool = False, n_simulations: int = 
     gold = GoldLayer()
     data_loader = DataLoader()
 
-    race_df = gold.build_prediction_features(year, race_number, 5, force=force)
+    try:
+        race_df = gold.build_prediction_features(year, race_number, session, force=force)
+    except Exception as e:
+        raise RuntimeError(
+            f"Errore nel caricamento dei dati per season: {year}, race: {race_number}, session: {session}, {e}"
+        )
 
     race_df["driver_id_raw"] = race_df["driver_id"].copy()  # salva prima del target encoding
     race_df["team_id_raw"] = race_df["team_id"].copy()
@@ -298,7 +305,7 @@ def main(year: int, race_number: int, force: bool = False, n_simulations: int = 
     driver_ids_raw = race_df["driver_id_raw"].to_numpy()
     summary = summarize_results(driver_ids_raw, simulated_positions, dnf_draws, scores)
 
-    summary_path = Path(f"results/summary_{year}_{race_number}.csv")
+    summary_path = Path(f"results/summary_{year}_{race_number}_{session}.csv")
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary.to_csv(summary_path, index=False)
 
@@ -320,6 +327,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Demo simulazione Monte Carlo — PitWall Oracle")
     parser.add_argument("--year", type=int, default=2026)
     parser.add_argument("--race", type=int, default=11, help="Numero di gara da simulare")
+    parser.add_argument("--session", type=int, default=5, help="Sessione da cui prendere le feature")
     parser.add_argument("--force", action="store_true", help="Forza il refresh delle feature Gold")
     parser.add_argument("--n-simulations", type=int, default=N_SIMULATIONS)
     parser.add_argument("--seed", type=int, default=2003)
@@ -328,7 +336,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     summary, simulated_positions, driver_ids, race_df = main(
-        args.year, args.race, force=args.force, n_simulations=args.n_simulations, seed=args.seed
+        args.year, args.race, args.session, force=args.force, n_simulations=args.n_simulations, seed=args.seed
     )
 
     for team_id in race_df["team_id_raw"].unique():
