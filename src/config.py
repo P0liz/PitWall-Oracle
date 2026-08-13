@@ -43,6 +43,9 @@ STARTING_YEAR = 2024
 STATIC_ENDING_YEAR = 2025
 NEW_YEAR = 2026
 
+# Simulator
+FALLBACK_SIGMA = 0.5
+
 # Session configuration
 # (year, is_conventional, race_type, data) => (session_number)
 SESSION_MAPPING = {

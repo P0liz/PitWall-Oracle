@@ -5,12 +5,14 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from .paths import history_relative_path
 from .schemas import (
     CurrentPredictionPointer,
     HeadToHeadResponse,
     HistoryDocument,
     HistoryIndex,
     PredictionDocument,
+    SessionType,
 )
 
 
@@ -49,35 +51,25 @@ class ResultsRepository:
             raise InvalidPublishedData(str(error)) from error
 
     def load_current(self) -> PredictionDocument:
-        pointer = self._load_model(
-            self._resolve_relative("predictions/current.json"), CurrentPredictionPointer
-        )
+        pointer = self._load_model(self._resolve_relative("predictions/current.json"), CurrentPredictionPointer)
         completed_race_path = self._resolve_relative(
-            f"history/{pointer.season}/round-{pointer.round:02d}.json"
+            history_relative_path(pointer.season, pointer.round, pointer.session_type)
         )
         if completed_race_path.is_file():
-            raise ResultNotFound(
-                "prediction_not_available",
-                "No current prediction is available for a completed race",
-            )
+            raise ResultNotFound("prediction_not_available", "No current prediction is available for a completed race")
 
-        prediction = self._load_model(
-            self._resolve_relative(pointer.prediction_path), PredictionDocument
-        )
-        if (prediction.race.season, prediction.race.round) != (
+        prediction = self._load_model(self._resolve_relative(pointer.prediction_path), PredictionDocument)
+        if (prediction.race.season, prediction.race.round, prediction.race.session_type) != (
             pointer.season,
             pointer.round,
+            pointer.session_type,
         ):
             raise InvalidPublishedData("Current prediction does not match its pointer")
         return prediction
 
-    def load_head_to_head(
-        self, driver_a: str, driver_b: str
-    ) -> HeadToHeadResponse:
+    def load_head_to_head(self, driver_a: str, driver_b: str) -> HeadToHeadResponse:
         if driver_a == driver_b:
-            raise ResultNotFound(
-                "head_to_head_not_found", "A driver cannot be compared with themselves"
-            )
+            raise ResultNotFound("head_to_head_not_found", "A driver cannot be compared with themselves")
 
         prediction = self.load_current()
         drivers = {driver.driver_id: driver for driver in prediction.drivers}
@@ -88,9 +80,7 @@ class ResultsRepository:
             driver_a_probability = prediction.head_to_head[driver_a][driver_b]
             driver_b_probability = prediction.head_to_head[driver_b][driver_a]
         except KeyError as error:
-            raise ResultNotFound(
-                "head_to_head_not_found", "No head-to-head result is available"
-            ) from error
+            raise ResultNotFound("head_to_head_not_found", "No head-to-head result is available") from error
 
         return HeadToHeadResponse(
             driver_a_id=driver_a,
@@ -103,21 +93,22 @@ class ResultsRepository:
 
     def list_history(self, season: int) -> HistoryIndex:
         self._validate_season(season)
-        index = self._load_model(
-            self._resolve_relative(f"history/{season}/index.json"), HistoryIndex
-        )
+        index = self._load_model(self._resolve_relative(f"history/{season}/index.json"), HistoryIndex)
         if index.season != season:
             raise InvalidPublishedData("History index season does not match its path")
         return index
 
-    def load_history(self, season: int, round_number: int) -> HistoryDocument:
+    def load_history(self, season: int, round_number: int, session_type: SessionType) -> HistoryDocument:
         self._validate_season(season)
         self._validate_round(round_number)
         history = self._load_model(
-            self._resolve_relative(f"history/{season}/round-{round_number:02d}.json"),
-            HistoryDocument,
+            self._resolve_relative(history_relative_path(season, round_number, session_type)), HistoryDocument
         )
-        if (history.race.season, history.race.round) != (season, round_number):
+        if (history.race.season, history.race.round, history.race.session_type) != (
+            season,
+            round_number,
+            session_type,
+        ):
             raise InvalidPublishedData("History document does not match its path")
         return history
 

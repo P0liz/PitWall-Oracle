@@ -34,15 +34,15 @@ class PitWallApiClient:
         try:
             response = self.session.get(f"{self.base_url}{path}", timeout=self.timeout_seconds)
         except (requests.Timeout, requests.ConnectionError) as error:
-            raise ApiUnavailable("API temporaneamente non raggiungibile") from error
+            raise ApiUnavailable("API temporarily unavailable") from error
 
         if response.status_code == 404:
             detail = response.json().get("detail", {})
             if detail.get("code") == "prediction_not_available":
-                raise PredictionUnavailable(detail.get("message", "Previsione non disponibile"))
+                raise PredictionUnavailable(detail.get("message", "Prediction unavailable"))
         if response.status_code >= 400:
             detail = response.json().get("detail", {})
-            raise ApiDataError(detail.get("message", f"Errore API {response.status_code}"))
+            raise ApiDataError(detail.get("message", f"API error {response.status_code}"))
         return response.json()
 
     def get_current_prediction(self) -> dict:
@@ -55,5 +55,6 @@ class PitWallApiClient:
     def list_history(self, season: int) -> dict:
         return self._get(f"/api/v1/history?{urlencode({'season': season})}")
 
-    def get_history(self, season: int, round_number: int) -> dict:
-        return self._get(f"/api/v1/history/{season}/{round_number}")
+    def get_history(self, season: int, round_number: int, session_type: str) -> dict:
+        query = urlencode({"session_type": session_type})
+        return self._get(f"/api/v1/history/{season}/{round_number}?{query}")

@@ -7,6 +7,9 @@ DNF probability separately, and feeds both into a Monte Carlo race simulator.
 The repository is developed primarily on Windows with PowerShell and the local
 virtual environment under `venv`.
 
+All public-facing webapp content must be written exclusively in English. Do not
+add a translation or localization system unless explicitly requested.
+
 Prefer:
 
 ```powershell

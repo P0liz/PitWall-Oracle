@@ -3,7 +3,7 @@ import pandas as pd
 from src.utils import setup_custom_logger, get_session_mapping, normalize_utc_timestamp
 from src.data.gold_layer import GoldLayer
 from src.config import STARTING_YEAR, STATIC_ENDING_YEAR, NEW_YEAR
-from src.dnf_features import DNF_CANDIDATE_FEATURES
+from src.dnf.dnf_features import DNF_CANDIDATE_FEATURES
 import datetime
 from pathlib import Path
 

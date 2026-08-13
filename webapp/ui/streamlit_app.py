@@ -25,15 +25,15 @@ def main() -> None:
     st.session_state["pitwall_api_url"] = api_base_url()
 
     with st.sidebar:
-        st.header("Come funziona")
+        st.header("How it works")
         st.write(
-            "Dopo le qualifiche, il modello pubblica l'ordine previsto e le "
-            "probabilità di gara. Lo storico confronta le previsioni con i risultati reali."
+            "After qualifying, the model publishes the predicted finishing order and race "
+            "probabilities. The history compares predictions with actual results."
         )
 
     navigation = st.navigation([
-        st.Page("current_prediction.py", title="Prossima gara", icon="🏎️", default=True),
-        st.Page("history.py", title="Storico", icon="📊"),
+        st.Page("current_prediction.py", title="Next race", icon="🏎️", default=True),
+        st.Page("history.py", title="History", icon="📊"),
     ])
     navigation.run()
 

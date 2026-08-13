@@ -5,13 +5,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-
 PublicationType = Literal["live", "backtest"]
+SessionType = Literal["sprint", "race"]
 
 
 class RaceInfo(BaseModel):
     season: int = Field(ge=2026)
     round: int = Field(ge=1, le=24)
+    session_type: SessionType
     name: str = Field(min_length=1)
     circuit: str = Field(min_length=1)
     start_time: datetime
@@ -81,6 +82,7 @@ class PredictionDocument(BaseModel):
 class CurrentPredictionPointer(BaseModel):
     season: int = Field(ge=2026)
     round: int = Field(ge=1, le=24)
+    session_type: SessionType
     prediction_path: str = Field(min_length=1)
 
 
@@ -120,6 +122,7 @@ class HistoryDocument(BaseModel):
 class HistoryIndexItem(BaseModel):
     season: int = Field(ge=2026)
     round: int = Field(ge=1, le=24)
+    session_type: SessionType
     name: str
     publication_type: PublicationType
 

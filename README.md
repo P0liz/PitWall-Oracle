@@ -11,6 +11,11 @@ validated JSON published in [`webapp/api/data`](webapp/api/data).
 The UI separates the next-race prediction and Head-to-Head tool from the
 historical predicted-versus-real comparison.
 
+Streamlit was chosen because the current interface is small and primarily
+data-driven. It keeps the web layer in Python and avoids introducing a separate
+frontend stack before the product requires deeper visual customization. The
+FastAPI boundary leaves room to replace the UI independently in the future.
+
 Install the small web-app dependencies in the local virtual environment:
 
 ```powershell

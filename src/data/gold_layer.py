@@ -3,14 +3,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from src.config import *
-from src.dnf_features import DNF_CANDIDATE_FEATURES
-from src.utils import (
-    setup_custom_logger,
-    got_end_penalty,
-    is_race_dnf,
-    get_session_mapping,
-    POST_RACE_EXCLUSION_STATUSES,
-)
+from src.dnf.dnf_features import DNF_CANDIDATE_FEATURES
+from src.utils import setup_custom_logger, got_end_penalty, is_race_dnf, get_session_mapping, POST_RACE_EXCLUSION_STATUSES
 from .silver_layer import SilverLayer
 from .history_builder import HistoryBuilder
 from .feature_engineer import FeatureEngineering
@@ -66,6 +60,8 @@ class GoldLayer:
         results = self.get_gp_features(
             event, year, race_number, session, force, prediction_mode=True, prediction_grid=resolved_grid.positions
         )
+        results.attrs["grid_source"] = resolved_grid.source
+        results.attrs["grid_source_url"] = resolved_grid.source_url
         results.to_parquet(self.data_dir / f"latest_race_pred.parquet", index=False)
         return results
 

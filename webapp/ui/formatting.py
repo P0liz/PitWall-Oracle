@@ -7,14 +7,14 @@ def percentage(value: float) -> str:
 
 
 def position_delta_label(delta: int | None) -> str:
-    """Describe the actual-versus-predicted position change in Italian."""
+    """Describe the actual-versus-predicted position change in English."""
     if delta is None:
-        return "Non classificato"
+        return "Not classified"
     if delta < 0:
-        return f"↑ {abs(delta)} meglio"
+        return f"↑ {abs(delta)} better"
     if delta > 0:
-        return f"↓ {delta} peggio"
-    return "= come previsto"
+        return f"↓ {delta} worse"
+    return "= as predicted"
 
 
 def prediction_rows(document: dict) -> list[dict]:
@@ -22,14 +22,14 @@ def prediction_rows(document: dict) -> list[dict]:
     drivers = sorted(document["drivers"], key=lambda driver: driver["predicted_position"])
     return [
         {
-            "Posizione": driver["predicted_position"],
-            "Pilota": driver["display_name"],
+            "Position": driver["predicted_position"],
+            "Driver": driver["display_name"],
             "Team": driver["team_name"],
-            "Vittoria": percentage(driver["win_probability"]),
-            "Podio": percentage(driver["podium_probability"]),
-            "Punti": percentage(driver["points_probability"]),
+            "Win": percentage(driver["win_probability"]),
+            "Podium": percentage(driver["podium_probability"]),
+            "Points": percentage(driver["points_probability"]),
             "DNF": percentage(driver["dnf_probability"]),
-            "Posizione media": f"{driver['expected_position']:.1f}",
+            "Average position": f"{driver['expected_position']:.1f}",
         }
         for driver in drivers
     ]
@@ -39,10 +39,10 @@ def history_rows(document: dict) -> list[dict]:
     """Return history comparisons with readable actual-versus-predicted deltas."""
     return [
         {
-            "Prevista": comparison["predicted_position"],
-            "Pilota": comparison["display_name"],
-            "Reale": comparison["actual_position"],
-            "Differenza": position_delta_label(comparison["position_difference"]),
+            "Predicted": comparison["predicted_position"],
+            "Driver": comparison["display_name"],
+            "Actual": comparison["actual_position"],
+            "Difference": position_delta_label(comparison["position_difference"]),
         }
         for comparison in document["comparisons"]
     ]

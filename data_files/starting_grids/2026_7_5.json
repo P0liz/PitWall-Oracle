@@ -1,0 +1,29 @@
+{
+  "source": "qualifying_fallback",
+  "source_url": null,
+  "fetched_at": "2026-08-13T11:33:12.048038+00:00",
+  "grid": {
+    "rus_george_russell": 1.0,
+    "ham_lewis_hamilton": 2.0,
+    "ant_kimi_antonelli": 3.0,
+    "nor_lando_norris": 4.0,
+    "ver_max_verstappen": 5.0,
+    "had_isack_hadjar": 6.0,
+    "pia_oscar_piastri": 7.0,
+    "law_liam_lawson": 8.0,
+    "hul_nico_hulkenberg": 9.0,
+    "lec_charles_leclerc": 10.0,
+    "lin_arvid_lindblad": 11.0,
+    "bor_gabriel_bortoleto": 12.0,
+    "col_franco_colapinto": 13.0,
+    "gas_pierre_gasly": 14.0,
+    "bea_oliver_bearman": 15.0,
+    "sai_carlos_sainz": 16.0,
+    "oco_esteban_ocon": 17.0,
+    "alb_alexander_albon": 18.0,
+    "per_sergio_perez": 19.0,
+    "bot_valtteri_bottas": 20.0,
+    "str_lance_stroll": 21.0,
+    "alo_fernando_alonso": 22.0
+  }
+}

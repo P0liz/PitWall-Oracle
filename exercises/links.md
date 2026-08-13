@@ -11,3 +11,7 @@
 - [IntermediateML](https://www.kaggle.com/learn/intermediate-machine-learning "Handle missing values, non-numeric values, data leakage, and more")
 - [MLFlow](https://mlflow.org/docs/latest/ml/tracking/quickstart/ "Quickstart")
 - [MLFlow-experiment](http://127.0.0.1:5000/)
+
+## Phase 3 sources:
+- [Fast API Guide](https://fastapi.tiangolo.com/tutorial/ "Tutorial")
+- [Streamlit](https://docs.streamlit.io/get-started "Get started")
