@@ -65,6 +65,11 @@ pairwise accuracy or mean absolute position error. NDCG and top-k overlap remain
 diagnostic metrics. Sprint queries are excluded from ranker training and primary
 evaluation; DNF and Monte Carlo evaluation are separate workflows.
 
+Promotion intentionally uses only the latest out-of-sample Grand Prix. Earlier
+regressions are not accumulated over a rolling window, so they cannot prevent a
+challenger that improves the latest race, without regressing any current
+scorecard metric, from being promoted. 
+
 ## DNF model and simulation
 
 `train_dnf_optimized.py` is the single DNF training and optimization workflow.

@@ -10,16 +10,13 @@ from webapp.ui.formatting import history_rows
 
 def history_options(index_document: dict) -> dict[str, tuple[int, int, str]]:
     """Return race labels in reverse round order with an explicit publication type."""
-    publication_labels = {
-        "backtest": "HISTORICAL BACKTEST",
-        "live": "LIVE PREDICTION",
-    }
     races = sorted(index_document["races"], key=lambda race: race["round"], reverse=True)
     return {
-        (
-            f"Round {race['round']} · {race['name']} · {race['session_type'].upper()} · "
-            f"{publication_labels[race['publication_type']]}"
-        ): (race["season"], race["round"], race["session_type"])
+        (f"Round {race['round']} · {race['name']} · {race['session_type'].upper()}"): (
+            race["season"],
+            race["round"],
+            race["session_type"],
+        )
         for race in races
     }
 
@@ -52,11 +49,7 @@ def _display_history_rows(history_document: dict) -> list[dict]:
     rows = history_rows(history_document)
     for row, comparison in zip(rows, history_document["comparisons"], strict=True):
         actual_position = comparison["actual_position"]
-        row["Actual"] = (
-            str(actual_position)
-            if actual_position is not None
-            else comparison["status"]
-        )
+        row["Actual"] = str(actual_position) if actual_position is not None else comparison["status"]
     return rows
 
 
@@ -77,10 +70,7 @@ def render_history(client: PitWallApiClient) -> None:
     try:
         index_document = client.list_history(season=2026)
     except ApiUnavailable:
-        _render_api_unavailable(
-            "The results service is currently unavailable.",
-            "retry_history_index",
-        )
+        _render_api_unavailable("The results service is currently unavailable.", "retry_history_index")
         return
     except ApiDataError:
         st.error("The published history is not available in a valid format.")
@@ -96,20 +86,14 @@ def render_history(client: PitWallApiClient) -> None:
     try:
         history_document = client.get_history(season, round_number, session_type)
     except ApiUnavailable:
-        _render_api_unavailable(
-            "The results service is currently unavailable.",
-            "retry_history_detail",
-        )
+        _render_api_unavailable("The results service is currently unavailable.", "retry_history_detail")
         return
     except ApiDataError:
         st.error("The comparison for this race is not available in a valid format.")
         return
 
     race = history_document["race"]
-    publication_type = history_document["publication"]["type"]
-    badge = "LIVE PREDICTION" if publication_type == "live" else "HISTORICAL BACKTEST"
     st.subheader(race["name"])
-    st.badge(f"{race['session_type'].upper()} · {badge}")
     st.caption(f"Round {race['round']} · {race['circuit']}")
 
     for column, message in zip(st.columns(3), summary_messages(history_document), strict=True):
