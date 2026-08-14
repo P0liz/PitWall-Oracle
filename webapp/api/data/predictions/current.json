@@ -1,6 +1,6 @@
 {
   "season": 2026,
   "round": 9,
-  "session_type": "sprint",
-  "prediction_path": "predictions/2026/round-09-sprint.json"
+  "session_type": "race",
+  "prediction_path": "predictions/2026/round-09-race.json"
 }
