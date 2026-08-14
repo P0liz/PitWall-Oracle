@@ -1,0 +1,15 @@
+fastf1==3.8.3
+fastparquet==2026.5.0
+joblib==1.5.3
+mlflow==3.15.1
+numpy==2.4.6
+optuna==4.9.0
+pandas==2.3.3
+pdfplumber==0.11.10
+pyarrow==24.0.0
+pydantic==2.13.4
+PyYAML==6.0.3
+requests==2.34.2
+scikit-learn==1.9.0
+scipy==1.17.1
+xgboost==3.4.0

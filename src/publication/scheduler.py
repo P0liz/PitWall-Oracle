@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 
@@ -8,10 +9,12 @@ from webapp.api.paths import history_relative_path, prediction_relative_path
 from src.utils import get_session_mapping
 from webapp.api.schemas import SessionType
 
+OperationName = Literal["publish-prediction", "publish-actual"]
+
 
 @dataclass(frozen=True)
 class DueOperation:
-    operation: str
+    operation: OperationName
     season: int
     round_number: int
     session_type: SessionType
@@ -34,11 +37,10 @@ def _event_sessions(row, season: int) -> tuple[tuple[SessionType, int, pd.Timest
 
 
 def choose_due_operations(
-    schedule: pd.DataFrame,
-    now: datetime,
-    data_root: Path,
-    season: int,
+    schedule: pd.DataFrame, now: datetime, data_root: Path, season: int, operation: OperationName | None = None
 ) -> tuple[DueOperation, ...]:
+    if operation not in (None, "publish-prediction", "publish-actual"):
+        raise ValueError(f"Unsupported publication operation filter: '{operation}'")
     data_root = Path(data_root)
     now_utc = pd.Timestamp(now)
     now_utc = now_utc.tz_localize("UTC") if now_utc.tzinfo is None else now_utc.tz_convert("UTC")
@@ -61,4 +63,7 @@ def choose_due_operations(
                     DueOperation("publish-prediction", season, round_number, session_type, session_number)
                 )
 
-    return tuple(due_actuals + due_predictions)
+    operations = tuple(due_actuals + due_predictions)
+    if operation is None:
+        return operations
+    return tuple(item for item in operations if item.operation == operation)

@@ -11,6 +11,10 @@ validated JSON published in [`webapp/api/data`](webapp/api/data).
 The UI separates the next-race prediction and Head-to-Head tool from the
 historical predicted-versus-real comparison.
 
+GitHub Actions automatically publishes due Sprint and Grand Prix predictions,
+adds completed-session results to the history, and retrains the Ranker and DNF
+models after newly published Grands Prix.
+
 Streamlit was chosen because the current interface is small and primarily
 data-driven. It keeps the web layer in Python and avoids introducing a separate
 frontend stack before the product requires deeper visual customization. The

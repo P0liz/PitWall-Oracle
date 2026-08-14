@@ -20,6 +20,8 @@ from src.publication.scheduler import DueOperation, choose_due_operations
 from src.utils import get_session_mapping
 from webapp.api.schemas import PredictionDocument, SessionType
 
+AUTO_KINDS = {"all": None, "prediction": "publish-prediction", "actual": "publish-actual"}
+
 
 def _session_number(event, season: int, session_type: SessionType) -> int:
     is_conventional = event["EventFormat"].iloc[0] == "conventional"
@@ -129,7 +131,11 @@ def _batch_summary(summaries: list[PublicationSummary]) -> dict:
     statuses = {summary.status for summary in summaries}
     status = "published" if "published" in statuses else "validated" if "validated" in statuses else "deferred"
     changed_paths = sorted({path for summary in summaries for path in summary.changed_paths})
-    return {"status": status, "operations": [summary.to_dict() for summary in summaries], "changed_paths": changed_paths}
+    return {
+        "status": status,
+        "operations": [summary.to_dict() for summary in summaries],
+        "changed_paths": changed_paths,
+    }
 
 
 def main(
@@ -137,6 +143,7 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(description="Generate validated PitWall Oracle web results")
     parser.add_argument("--operation", choices=("auto", "publish-prediction", "publish-actual"), default="auto")
+    parser.add_argument("--auto-kind", choices=tuple(AUTO_KINDS), default="all")
     parser.add_argument("--season", type=int)
     parser.add_argument("--round", dest="round_number", type=int)
     parser.add_argument("--session-type", choices=("sprint", "race"), default="race")
@@ -159,12 +166,16 @@ def main(
     automatic = args.operation == "auto"
     if automatic:
         schedule = schedule_loader(season)
-        due = choose_due_operations(schedule, generated_at, args.data_root, season)
+        due = choose_due_operations(
+            schedule, generated_at, args.data_root, season, operation=AUTO_KINDS[args.auto_kind]
+        )
         if not due:
             _write_summary(args.summary_path, _batch_summary([]))
             return 0
         operations = due
     else:
+        if args.auto_kind != "all":
+            parser.error("--auto-kind can only be used with --operation auto")
         if args.season is None or args.round_number is None:
             parser.error("manual publication requires --season and --round")
         event = GoldLayer().silver.get_clean_event_metadata(args.season, args.round_number, args.force_refresh)

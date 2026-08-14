@@ -176,8 +176,27 @@ class PublicationPipelineTests(unittest.TestCase):
                     operations = choose_due_operations(schedule, now, data_root, 2026)
                     self.assertEqual(tuple(item.session_type for item in operations), expected)
 
+            sprint_archive = data_root / "predictions" / "2026" / "round-01-sprint.json"
+            sprint_archive.parent.mkdir(parents=True)
+            sprint_archive.write_text("{}", encoding="utf-8")
+            filter_time = datetime(2026, 3, 8, 13, tzinfo=timezone.utc)
+            filters = (
+                (None, (("publish-actual", "sprint"), ("publish-prediction", "race"))),
+                ("publish-prediction", (("publish-prediction", "race"),)),
+                ("publish-actual", (("publish-actual", "sprint"),)),
+            )
+            for operation_filter, expected in filters:
+                with self.subTest(operation_filter=operation_filter):
+                    operations = choose_due_operations(
+                        schedule, filter_time, data_root, 2026, operation=operation_filter
+                    )
+                    self.assertEqual(tuple((item.operation, item.session_type) for item in operations), expected)
+            with self.assertRaises(ValueError):
+                choose_due_operations(schedule, filter_time, data_root, 2026, operation="unsupported")
+            sprint_archive.unlink()
+
             archive = data_root / "predictions" / "2026" / "round-01-race.json"
-            archive.parent.mkdir(parents=True)
+            archive.parent.mkdir(parents=True, exist_ok=True)
             archive.write_text("{}", encoding="utf-8")
             self.assertEqual(
                 choose_due_operations(schedule, datetime(2026, 3, 9, 12, 59, 59, tzinfo=timezone.utc), data_root, 2026),
@@ -249,6 +268,81 @@ class PublicationPipelineTests(unittest.TestCase):
             self.assertEqual(summary["status"], "no-op")
             self.assertEqual(summary["operations"], [])
             self.assertEqual(summary["changed_paths"], [])
+
+    def test_workflow_change_policy_allows_only_operation_scoped_paths(self):
+        from scripts.validate_workflow_changes import WorkflowPolicyError, published_current_gp, validate_changed_paths
+
+        prediction_summary = {
+            "status": "published",
+            "operations": [
+                {
+                    "status": "published",
+                    "operation": "publish-prediction",
+                    "season": 2026,
+                    "round_number": 6,
+                    "session_type": "sprint",
+                    "changed_paths": ["predictions/2026/round-06-sprint.json", "predictions/current.json"],
+                }
+            ],
+        }
+        prediction_paths = (
+            "webapp/api/data/predictions/2026/round-06-sprint.json",
+            "webapp/api/data/predictions/current.json",
+            "data_files/bronze/2026_6_event.parquet",
+        )
+        self.assertEqual(
+            validate_changed_paths("prediction", prediction_paths, prediction_summary, 2026, False),
+            tuple(sorted(prediction_paths)),
+        )
+        with self.assertRaises(WorkflowPolicyError):
+            validate_changed_paths("prediction", (*prediction_paths, "src/config.py"), prediction_summary, 2026, False)
+
+        sprint_summary = {
+            "status": "published",
+            "operations": [
+                {
+                    "status": "published",
+                    "operation": "publish-actual",
+                    "season": 2026,
+                    "round_number": 6,
+                    "session_type": "sprint",
+                    "changed_paths": ["history/2026/round-06-sprint.json", "history/2026/index.json"],
+                }
+            ],
+        }
+        with self.assertRaises(WorkflowPolicyError):
+            validate_changed_paths("post-race", ("models/pitwall_oracle_2026_6.json",), sprint_summary, 2026, False)
+
+        race_summary = {
+            "status": "published",
+            "operations": [
+                {
+                    "status": "published",
+                    "operation": "publish-actual",
+                    "season": 2026,
+                    "round_number": 6,
+                    "session_type": "race",
+                    "changed_paths": ["history/2026/round-06-race.json", "history/2026/index.json"],
+                }
+            ],
+        }
+        model_paths = (
+            "webapp/api/data/history/2026/round-06-race.json",
+            "webapp/api/data/history/2026/index.json",
+            "models/pitwall_oracle_2026_6.json",
+            "models/dnf_logistic_latest.joblib",
+            "models/monte_carlo_calibration.json",
+        )
+        self.assertEqual(
+            validate_changed_paths("post-race", model_paths, race_summary, 2026, True), tuple(sorted(model_paths))
+        )
+        self.assertTrue(published_current_gp(race_summary, 2026, True))
+        self.assertFalse(published_current_gp(sprint_summary, 2026, True))
+        self.assertFalse(published_current_gp(race_summary, 2026, False))
+        with self.assertRaises(WorkflowPolicyError):
+            validate_changed_paths(
+                "post-race", (*model_paths, "models/pitwall_oracle_pending.json"), race_summary, 2026, True
+            )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,161 @@
+name: Publish predictions
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: Season to publish
+        required: true
+        type: number
+      round:
+        description: Championship round
+        required: true
+        type: number
+      session_type:
+        description: Session to publish
+        required: true
+        default: race
+        type: choice
+        options:
+          - sprint
+          - race
+      dry_run:
+        description: Validate without committing
+        required: true
+        default: true
+        type: boolean
+      simulations:
+        description: Monte Carlo simulations
+        required: true
+        default: 10000
+        type: number
+      seed:
+        description: Monte Carlo seed
+        required: true
+        default: 2003
+        type: number
+      force_refresh:
+        description: Refresh FastF1 data
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: "5,35 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pitwall-publication
+  cancel-in-progress: false
+
+env:
+  SUMMARY_PATH: results/publication-summary.json
+  COMMIT_PATHS: results/commit-paths.txt
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || vars.PITWALL_AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/requirements-actions.txt
+
+      - name: Install publication dependencies
+        run: python -m pip install -r .github/requirements-actions.txt
+
+      - name: Run focused publication checks
+        run: python -m unittest discover -s tests -p "test_publication_pipeline.py"
+
+      - name: Resolve publication year
+        id: context
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            year="${{ inputs.season }}"
+          else
+            year="$(date -u +%Y)"
+          fi
+          echo "year=$year" >> "$GITHUB_OUTPUT"
+
+      - name: Publish automatically due predictions
+        if: github.event_name == 'schedule'
+        run: >-
+          python scripts/generate_web_result.py
+          --operation auto
+          --auto-kind prediction
+          --publish
+          --summary-path "$SUMMARY_PATH"
+
+      - name: Run manual prediction
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          args=(
+            --operation publish-prediction
+            --season "${{ inputs.season }}"
+            --round "${{ inputs.round }}"
+            --session-type "${{ inputs.session_type }}"
+            --simulations "${{ inputs.simulations }}"
+            --seed "${{ inputs.seed }}"
+            --summary-path "$SUMMARY_PATH"
+          )
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            args+=(--dry-run)
+          else
+            args+=(--publish)
+          fi
+          if [[ "${{ inputs.force_refresh }}" == "true" ]]; then
+            args+=(--force-refresh)
+          fi
+          python scripts/generate_web_result.py "${args[@]}"
+
+      - name: Validate changed paths
+        id: changes
+        run: >-
+          python scripts/validate_workflow_changes.py validate
+          --mode prediction
+          --summary-path "$SUMMARY_PATH"
+          --year "${{ steps.context.outputs.year }}"
+          --training-ran false
+          --output-path "$COMMIT_PATHS"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Commit and push prediction data
+        if: steps.changes.outputs.has_changes == 'true' && (github.event_name == 'schedule' || inputs.dry_run == false)
+        shell: bash
+        run: |
+          while IFS= read -r path; do
+            [[ -n "$path" ]] && git add -- "$path"
+          done < "$COMMIT_PATHS"
+          if git diff --cached --quiet; then
+            echo "No staged publication changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(publication): publish due predictions"
+          git push origin HEAD:main
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Prediction publication" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f "$SUMMARY_PATH" ]]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            sed -n '1,240p' "$SUMMARY_PATH" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No publication summary was produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
