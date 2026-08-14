@@ -1,10 +1,15 @@
 """Streamlit entry point for the public PitWall Oracle results app."""
 
 import os
+import sys
 from pathlib import Path
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 LOGO_PATH = Path(__file__).parent / "assets" / "pitwall-signal.png"
 

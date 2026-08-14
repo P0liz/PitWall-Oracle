@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -273,6 +275,33 @@ class WebappContractTests(unittest.TestCase):
         self.assertEqual(list(prediction), ["Position", "Driver", "Team", "Win", "Podium", "Points", "DNF"])
         self.assertEqual(list(history), ["Driver", "Predicted", "Actual", "Difference"])
         self.assertEqual(history["Predicted"], "6")
+
+    def test_streamlit_entrypoint_exposes_repository_package_to_cloud_pages(self):
+        repository_root = Path(__file__).resolve().parents[1]
+        entrypoint = repository_root / "webapp" / "ui" / "streamlit_app.py"
+        cloud_import = f"""
+import runpy
+import sys
+from pathlib import Path
+
+root = Path({str(repository_root)!r}).resolve()
+ui = root / "webapp" / "ui"
+sys.path = [str(ui)] + [
+    path
+    for path in sys.path
+    if path and not str(path).startswith("__editable__") and Path(path).resolve() != root
+]
+sys.meta_path = [finder for finder in sys.meta_path if "__editable__" not in repr(finder)]
+runpy.run_path({str(entrypoint)!r}, run_name="streamlit_cloud_entrypoint")
+import webapp.ui.current_prediction
+import webapp.ui.history
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", cloud_import], cwd=repository_root, capture_output=True, text=True
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":
