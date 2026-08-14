@@ -35,6 +35,13 @@
       "session_type": "sprint",
       "name": "Miami Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 4,
+      "session_type": "race",
+      "name": "Miami Grand Prix",
+      "publication_type": "live"
     }
   ]
 }
