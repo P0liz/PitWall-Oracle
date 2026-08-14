@@ -9,6 +9,17 @@ from src.utils import setup_custom_logger
 from ..config import GLOBAL_SEED, DEFAULT_DECAY_RATE, NEW_YEAR
 from .ranker_features import PRODUCTION_FEATURES
 
+RANKING_ORDER_COLUMNS = ["race_date", "raw_driver_id"]
+
+
+def sort_ranking_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return ranking rows in the canonical order shared by every platform."""
+
+    missing = [column for column in RANKING_ORDER_COLUMNS if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Colonne necessarie all'ordinamento del ranker mancanti: {missing}")
+    return frame.sort_values(RANKING_ORDER_COLUMNS, kind="stable").reset_index(drop=True)
+
 
 def make_weights(race_dates: pd.Series, decay_rate: float, reference_date: pd.Timestamp) -> np.ndarray:
     days_elapsed = (reference_date - race_dates).dt.days
@@ -51,6 +62,8 @@ class Training:
             objective="rank:ndcg",
             tree_method="hist",
             random_state=GLOBAL_SEED,
+            seed_per_iteration=True,
+            n_jobs=1,
             n_estimators=200,
             learning_rate=0.05,
             max_depth=4,
@@ -119,6 +132,8 @@ class StaticTraining(Training):
             objective="rank:ndcg",
             tree_method="hist",
             random_state=GLOBAL_SEED,
+            seed_per_iteration=True,
+            n_jobs=1,
             n_estimators=200,
             learning_rate=0.05,
             max_depth=4,
@@ -147,9 +162,9 @@ class StaticTraining(Training):
         self.ranker.early_stopping_rounds = 20
         self.ranker.eval_metric = "ndcg@20"
 
-        self.train_df = self.train_df.sort_values("race_date").reset_index(drop=True)
+        self.train_df = sort_ranking_frame(self.train_df)
         self.train_df["qid"] = pd.factorize(self.train_df["race_date"])[0]
-        self.test_df = self.test_df.sort_values("race_date").reset_index(drop=True)
+        self.test_df = sort_ranking_frame(self.test_df)
         self.test_df["qid"] = pd.factorize(self.test_df["race_date"])[0]
 
         reference_date = self.test_df["race_date"].min()  # prima gara del test set
@@ -201,6 +216,8 @@ class DynamicTraining(Training):
             objective="rank:ndcg",
             tree_method="hist",
             random_state=GLOBAL_SEED,
+            seed_per_iteration=True,
+            n_jobs=1,
             missing=np.nan,
             enable_categorical=True,
             ndcg_exp_gain=False,
@@ -222,7 +239,7 @@ class DynamicTraining(Training):
             raise ValueError("Dati non trovati. Esegui prepare_data() prima di train().")
 
         # Ordiniamo temporalmente
-        self.train_df = self.train_df.sort_values("race_date").reset_index(drop=True)
+        self.train_df = sort_ranking_frame(self.train_df)
         self.train_df["qid"] = pd.factorize(self.train_df["race_date"])[0]
 
         # 100% dei dati disponibili va nel train set!
