@@ -1,6 +1,19 @@
 {
   "season": 2026,
   "races": [
-    {"season": 2026, "round": 1, "session_type": "race", "name": "Australian Grand Prix", "publication_type": "backtest"}
+    {
+      "season": 2026,
+      "round": 1,
+      "session_type": "race",
+      "name": "Australian Grand Prix",
+      "publication_type": "backtest"
+    },
+    {
+      "season": 2026,
+      "round": 11,
+      "session_type": "race",
+      "name": "Hungarian Grand Prix",
+      "publication_type": "live"
+    }
   ]
 }
