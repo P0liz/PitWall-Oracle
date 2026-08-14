@@ -1,5 +1,12 @@
 {
   "season": 2026,
   "races": [
+    {
+      "season": 2026,
+      "round": 1,
+      "session_type": "race",
+      "name": "Australian Grand Prix",
+      "publication_type": "live"
+    }
   ]
 }
