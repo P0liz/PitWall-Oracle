@@ -29,7 +29,6 @@ def prediction_rows(document: dict) -> list[dict]:
             "Podium": percentage(driver["podium_probability"]),
             "Points": percentage(driver["points_probability"]),
             "DNF": percentage(driver["dnf_probability"]),
-            "Average position": f"{driver['expected_position']:.1f}",
         }
         for driver in drivers
     ]
@@ -39,8 +38,8 @@ def history_rows(document: dict) -> list[dict]:
     """Return history comparisons with readable actual-versus-predicted deltas."""
     return [
         {
-            "Predicted": comparison["predicted_position"],
             "Driver": comparison["display_name"],
+            "Predicted": comparison["predicted_position"],
             "Actual": comparison["actual_position"],
             "Difference": position_delta_label(comparison["position_difference"]),
         }

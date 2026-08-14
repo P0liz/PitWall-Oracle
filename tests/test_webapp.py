@@ -13,6 +13,7 @@ from webapp.api.repository import InvalidPublishedData, ResultNotFound, ResultsR
 from webapp.api.schemas import HistoryDocument, HistoryIndex, PredictionDocument
 from webapp.ui.api_client import ApiUnavailable, PitWallApiClient, PredictionUnavailable
 from webapp.ui.current_prediction import fetch_head_to_head, head_to_head_options
+from webapp.ui.formatting import prediction_rows
 from webapp.ui.history import _display_history_rows, history_options
 
 
@@ -252,6 +253,26 @@ class WebappContractTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["Actual"], "Retired")
         self.assertEqual(rows[0]["Difference"], "Not classified")
+
+    def test_prediction_and_history_tables_use_requested_column_order(self):
+        prediction = prediction_rows(valid_prediction())[0]
+        history = _display_history_rows(
+            {
+                "comparisons": [
+                    {
+                        "display_name": "Lewis Hamilton",
+                        "predicted_position": 6,
+                        "actual_position": 4,
+                        "position_difference": -2,
+                        "status": "Finished",
+                    }
+                ]
+            }
+        )[0]
+
+        self.assertEqual(list(prediction), ["Position", "Driver", "Team", "Win", "Podium", "Points", "DNF"])
+        self.assertEqual(list(history), ["Driver", "Predicted", "Actual", "Difference"])
+        self.assertEqual(history["Predicted"], "6")
 
 
 if __name__ == "__main__":

@@ -42,12 +42,11 @@ def _render_api_unavailable(message: str, key: str) -> None:
 def _render_prediction_header(document: dict) -> None:
     race = document["race"]
     publication = document["publication"]
-    publication_label = "Live" if publication["type"] == "live" else "Backtest"
     session_label = "Sprint" if race["session_type"] == "sprint" else "Grand Prix"
 
     st.title(f"Next {session_label}")
     st.subheader(race["name"])
-    st.badge(f"{session_label} · {publication_label}")
+    st.badge(f"{session_label} · Live")
     details, generated = st.columns(2)
     details.write(f"**Circuit:** {race['circuit']}")
     details.write(f"**Start:** {_format_datetime(race['start_time'])}")

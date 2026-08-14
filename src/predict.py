@@ -6,7 +6,7 @@ from src.data.data_loader import DataLoader
 from src.config import NEW_YEAR
 from src.ranker.ranker_model_loader import resolve_ranker_model_path
 
-PREDICT_RACE = 4  # numero gara da predire
+PREDICT_RACE = 11  # numero gara da predire
 RACE_SESSION = 5
 
 

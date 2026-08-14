@@ -49,6 +49,7 @@ def _display_history_rows(history_document: dict) -> list[dict]:
     rows = history_rows(history_document)
     for row, comparison in zip(rows, history_document["comparisons"], strict=True):
         actual_position = comparison["actual_position"]
+        row["Predicted"] = str(row["Predicted"])
         row["Actual"] = str(actual_position) if actual_position is not None else comparison["status"]
     return rows
 
@@ -100,8 +101,7 @@ def render_history(client: PitWallApiClient) -> None:
         column.info(message)
 
     st.subheader("Prediction and actual result")
-    st.dataframe(_display_history_rows(history_document), hide_index=True, use_container_width=True)
-    _render_model_details(history_document)
+    st.dataframe(_display_history_rows(history_document), hide_index=True, use_container_width=True, height="content")
 
 
 def main() -> None:

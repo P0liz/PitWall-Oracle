@@ -1,9 +1,12 @@
 """Streamlit entry point for the public PitWall Oracle results app."""
 
 import os
+from pathlib import Path
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
+
+LOGO_PATH = Path(__file__).parent / "assets" / "pitwall-signal.png"
 
 
 def api_base_url() -> str:
@@ -18,14 +21,21 @@ def api_base_url() -> str:
 def main() -> None:
     """Configure shared UI chrome and launch the selected page."""
     st.set_page_config(page_title="PitWall Oracle", page_icon="🏁", layout="wide")
+    st.logo(LOGO_PATH, size="large")
     st.session_state["pitwall_api_url"] = api_base_url()
-
     with st.sidebar:
-        st.header("How it works")
+        st.markdown("## PitWall Oracle")
+        st.subheader("How it works")
         st.write(
             "A few hours before the race, the model publishes the predicted finishing order and race probabilities."
         )
         st.write("The history compares predictions with actual results.")
+        st.subheader("My contacts")
+        st.markdown(
+            "[polizzotto.gabriele7@gmail.com]()  \n"
+            "[GitHub](https://github.com/P0liz)  \n"
+            "[LinkedIn](https://www.linkedin.com/in/gabriele-polizzotto/)"
+        )
 
     navigation = st.navigation(
         [
