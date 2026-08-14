@@ -42,6 +42,13 @@
       "session_type": "race",
       "name": "Miami Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 5,
+      "session_type": "sprint",
+      "name": "Canadian Grand Prix",
+      "publication_type": "live"
     }
   ]
 }
