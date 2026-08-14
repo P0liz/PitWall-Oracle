@@ -3,13 +3,15 @@ import numpy as np
 import optuna
 from xgboost import XGBRanker
 from ..config import GLOBAL_SEED
-from .ranker_model import make_weights
+from .ranker_model import make_weights, sort_ranking_frame
 from .ranking_metrics import evaluate_grouped_rankings
 
 FIXED_PARAMS = {
     "objective": "rank:ndcg",
     "tree_method": "hist",
     "random_state": GLOBAL_SEED,
+    "seed_per_iteration": True,
+    "n_jobs": 1,
     "missing": np.nan,
     "enable_categorical": True,
     "ndcg_exp_gain": False,
@@ -52,7 +54,7 @@ def run_hpo_optuna(trainer, n_trials=20, n_folds=4, min_train_races=15):
     trainer.log.info("Avvio ottimizzazione iperparametri con Optuna (Walk-Forward CV)...")
 
     # 1. Recuperiamo il dataset statico dal trainer e lo ordiniamo temporalmente
-    df = trainer.train_df.sort_values("race_date").reset_index(drop=True)
+    df = sort_ranking_frame(trainer.train_df)
 
     # 2. Calcoliamo il qid esattamente come un intero incrementale per GP
     df["qid"] = pd.factorize(df["race_date"])[0]

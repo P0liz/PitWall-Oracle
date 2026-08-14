@@ -17,24 +17,22 @@ def api_base_url() -> str:
 
 def main() -> None:
     """Configure shared UI chrome and launch the selected page."""
-    st.set_page_config(
-        page_title="PitWall Oracle",
-        page_icon="🏁",
-        layout="wide",
-    )
+    st.set_page_config(page_title="PitWall Oracle", page_icon="🏁", layout="wide")
     st.session_state["pitwall_api_url"] = api_base_url()
 
     with st.sidebar:
         st.header("How it works")
         st.write(
-            "After qualifying, the model publishes the predicted finishing order and race "
-            "probabilities. The history compares predictions with actual results."
+            "A few hours before the race, the model publishes the predicted finishing order and race probabilities."
         )
+        st.write("The history compares predictions with actual results.")
 
-    navigation = st.navigation([
-        st.Page("current_prediction.py", title="Next race", icon="🏎️", default=True),
-        st.Page("history.py", title="History", icon="📊"),
-    ])
+    navigation = st.navigation(
+        [
+            st.Page("current_prediction.py", title="Next race", icon="🏎️", default=True),
+            st.Page("history.py", title="History", icon="📊"),
+        ]
+    )
     navigation.run()
 
 

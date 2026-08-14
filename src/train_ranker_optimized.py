@@ -1,5 +1,10 @@
 from src.data.gold_layer import GoldLayer
-from src.ranker.ranker_model import DynamicTraining, StaticTraining, select_model_feature_frame
+from src.ranker.ranker_model import (
+    DynamicTraining,
+    StaticTraining,
+    select_model_feature_frame,
+    sort_ranking_frame,
+)
 from src.ranker.ranker_optimization import FIXED_PARAMS, run_hpo_optuna
 from src.data.data_loader import DataLoader, NEW_YEAR, CATEGORICAL_COLS
 from src.config import DEFAULT_DECAY_RATE, to_log_ranker, TARGET_MULTIPLIER, RANKER_OPTUNA_TRIALS, FALLBACK_SIGMA
@@ -113,7 +118,7 @@ def run_pipeline(model_dir: Path = MODEL_DIR):
         mlflow.log_artifact(str(os.path.join(trainer_static.model_dir, BASE_MODEL)), artifact_path="models")
 
         # Scorecard sul test statico, sempre aggregata gara per gara.
-        trainer_static.test_df = trainer_static.test_df.sort_values("race_date").reset_index(drop=True)
+        trainer_static.test_df = sort_ranking_frame(trainer_static.test_df)
         trainer_static.test_df["qid"] = pd.factorize(trainer_static.test_df["race_date"])[0]
         X_test_fixed = trainer_static.feature_frame(trainer_static.test_df)
         static_metrics = evaluate_grouped_rankings(trainer_static.test_df, base_model.predict(X_test_fixed))
