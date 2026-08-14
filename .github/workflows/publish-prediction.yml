@@ -40,7 +40,7 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: "5,35 * * * *"
+    - cron: "5 */2 * * *"
 
 permissions:
   contents: write
