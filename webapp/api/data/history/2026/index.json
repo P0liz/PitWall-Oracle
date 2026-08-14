@@ -70,6 +70,13 @@
       "session_type": "race",
       "name": "Barcelona Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 8,
+      "session_type": "race",
+      "name": "Austrian Grand Prix",
+      "publication_type": "live"
     }
   ]
 }
