@@ -14,6 +14,13 @@
       "session_type": "sprint",
       "name": "Chinese Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 2,
+      "session_type": "race",
+      "name": "Chinese Grand Prix",
+      "publication_type": "live"
     }
   ]
 }
