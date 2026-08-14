@@ -24,7 +24,7 @@ def main() -> None:
     st.logo(LOGO_PATH, size="large")
     st.session_state["pitwall_api_url"] = api_base_url()
     with st.sidebar:
-        st.markdown("## PitWall Oracle")
+        st.header("PitWall Oracle")
         st.subheader("How it works")
         st.write(
             "A few hours before the race, the model publishes the predicted finishing order and race probabilities."
@@ -32,9 +32,9 @@ def main() -> None:
         st.write("The history compares predictions with actual results.")
         st.subheader("My contacts")
         st.markdown(
-            "[polizzotto.gabriele7@gmail.com]()  \n"
-            "[GitHub](https://github.com/P0liz)  \n"
-            "[LinkedIn](https://www.linkedin.com/in/gabriele-polizzotto/)"
+            "- [polizzotto.gabriele7@gmail.com]()  \n"
+            "- [GitHub](https://github.com/P0liz)  \n"
+            "- [LinkedIn](https://www.linkedin.com/in/gabriele-polizzotto/)"
         )
 
     navigation = st.navigation(

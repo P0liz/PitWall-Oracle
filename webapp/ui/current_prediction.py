@@ -109,7 +109,8 @@ def render_current_prediction(client: PitWallApiClient) -> None:
         document = client.get_current_prediction()
     except PredictionUnavailable:
         st.title("Next race")
-        st.info("The prediction will be available after qualifying.")
+        st.info("The prediction (including win, podium and points probabilities) will be available after qualifying.")
+        st.info("Have a look at the past predictions in 'History' in the meantime.")
         return
     except ApiUnavailable:
         st.title("Next race")
