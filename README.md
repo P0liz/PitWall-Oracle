@@ -2,6 +2,19 @@
 
 Custom trained ML model to predict Formula 1 race outcomes.
 
+## Repository structure
+
+```text
+PitWall-Oracle/
+|-- src/          Data pipeline, ranking and DNF models, simulation, and publication logic
+|-- scripts/      Automation entry points for prediction and post-race workflows
+|-- webapp/       FastAPI backend, Streamlit UI, and published JSON data
+|-- data_files/   Cached datasets and starting grids
+|-- models/       Ranker, DNF, and Monte Carlo calibration artifacts
+|-- tests/        Unit and regression tests
+|-- exercises/    Exploratory and learning scripts
+```
+
 ## Web app
 
 The public app serves precomputed PitWall Oracle results through a read-only
@@ -40,22 +53,29 @@ $env:PITWALL_API_URL = "http://127.0.0.1:8000"
 .\venv\Scripts\python.exe -m streamlit run webapp/ui/streamlit_app.py
 ```
 
+The webapp is deployed via streamlit and accessible at [PitWall Oracle](https://pitwall-oracle.streamlit.app/)
+
+It is possibile that the page is **sleeping** (cause of Streamlit Community Cloud policy), so just press the button to wake it up and wait a few seconds before refreshing the page.
+
+<!--
 For details, see the [web-app design](docs/superpowers/specs/2026-08-08-web-app-design.md)
 and [implementation plan](docs/superpowers/plans/2026-08-08-web-app-mvp.md).
 The implementation is organised around the [API app](webapp/api/app.py),
 [data contracts](webapp/api/schemas.py), [JSON repository](webapp/api/repository.py),
 and [Streamlit entry point](webapp/ui/streamlit_app.py).
+-->
+
 
 ## Ranker training and evaluation
 
 The ranker uses the explicit `PRODUCTION_FEATURES` tuple in
-`src/ranker_features.py`; feature subsets are no longer selected by a separate
+`src/ranker/ranker_features.py`; feature subsets are no longer selected by a separate
 combinatorial pipeline.
 
 Run the optimized training workflow with:
 
 ```powershell
-.\venv\Scripts\python.exe train_ranker_optimized.py
+.\venv\Scripts\python.exe -m src.train_ranker_optimized
 ```
 
 Optuna tunes model parameters on expanding temporal folds. Its primary score is
@@ -72,7 +92,7 @@ scorecard metric, from being promoted.
 
 ## DNF model and simulation
 
-`train_dnf_optimized.py` is the single DNF training and optimization workflow.
+`src/train_dnf_optimized.py` is the single DNF training and optimization workflow.
 It uses `LogisticRegression`; Optuna jointly selects the feature subset and
 hyperparameters on expanding temporal folds, followed by a separate
 out-of-sample holdout evaluation.
@@ -90,22 +110,21 @@ the out-of-sample period remains separate from selection.
 Train the DNF model with:
 
 ```powershell
-.\venv\Scripts\python.exe train_dnf_optimized.py
+.\venv\Scripts\python.exe -m src.train_dnf_optimized
 ```
 
-The Monte Carlo simulator supports only the logistic model (the default) and
-`none`, a ranker-only control with no DNF probability model. A missing or
-incompatible logistic artifact produces an explicit error; the simulator does
-not fall back to an alternative probability method.
+The Monte Carlo simulator combines the ranker with the logistic DNF model. A
+missing or incompatible logistic artifact produces an explicit error; the
+simulator does not fall back to an alternative probability method.
 
-Run the logistic simulation with:
+Run a simulation with:
 
 ```powershell
-.\venv\Scripts\python.exe monte_carlo_simulator.py --year 2026 --race 10 --dnf-strategy logistic
+.\venv\Scripts\python.exe -m src.monte_carlo_simulator --year 2026 --race 10
 ```
 
-Run the ranker-only control with:
-
-```powershell
-.\venv\Scripts\python.exe monte_carlo_simulator.py --year 2026 --race 10 --dnf-strategy none
-```
+## Future improvements:
+ - Add some sort of comparision with chat gpt or gemini (maybe via api key), for the prediction, to see who did better.
+ - In the next race window add when and where the next race will be, plus a countdown.
+ - Display also the matrix for head to head in some way.
+ - Improve frontend by switching to Vue to realize a proper webapp (deployment on Vercel)

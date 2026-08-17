@@ -37,7 +37,7 @@ def main() -> None:
         st.write("The history compares predictions with actual results.")
         st.subheader("My contacts")
         st.markdown(
-            "- [polizzotto.gabriele7@gmail.com]()  \n"
+            "- polizzotto.gabriele7@gmail.com  \n"
             "- [GitHub](https://github.com/P0liz)  \n"
             "- [LinkedIn](https://www.linkedin.com/in/gabriele-polizzotto/)"
         )

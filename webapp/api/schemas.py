@@ -127,9 +127,26 @@ class HistoryIndexItem(BaseModel):
     publication_type: PublicationType
 
 
+class HistoryStatisticsPoint(BaseModel):
+    round: int = Field(ge=1, le=24)
+    session_type: SessionType
+    winner_accuracy: float = Field(ge=0, le=1)
+    podium_hit_rate: float = Field(ge=0, le=1)
+    pairwise_accuracy: float = Field(ge=0, le=1)
+    mean_absolute_position_error: float | None = Field(default=None, ge=0)
+
+
+class GlobalHistoryStatistics(BaseModel):
+    winner_accuracy: float = Field(ge=0, le=1)
+    podium_hit_rate: float = Field(ge=0, le=1)
+    pairwise_accuracy: float = Field(ge=0, le=1)
+    timeline: list[HistoryStatisticsPoint]
+
+
 class HistoryIndex(BaseModel):
     season: int = Field(ge=2026)
     races: list[HistoryIndexItem]
+    global_statistics: GlobalHistoryStatistics | None = None
 
 
 class HeadToHeadResponse(BaseModel):

@@ -7,6 +7,13 @@ import streamlit as st
 from webapp.ui.api_client import ApiDataError, ApiUnavailable, PitWallApiClient
 from webapp.ui.formatting import history_rows
 
+GLOBAL_STATISTICS = (
+    ("winner_accuracy", "Winner accuracy"),
+    ("podium_hit_rate", "Podium hit rate"),
+    ("pairwise_accuracy", "Pairwise accuracy"),
+)
+MAE_LABEL = "Mean absolute position error"
+
 
 def history_options(index_document: dict) -> dict[str, tuple[int, int, str]]:
     """Return race labels in reverse round order with an explicit publication type."""
@@ -27,10 +34,78 @@ def summary_messages(history_document: dict) -> list[str]:
     mean_error = summary["mean_absolute_position_error"]
     mean_error_label = "unavailable" if mean_error is None else f"{mean_error:.1f}"
     return [
-        f"Average error: {mean_error_label}{'' if mean_error is None else ' positions'}",
         f"Predicted podium: {summary['podium_hits']} correct drivers out of {summary['podium_total']}",
         f"Predicted top 5: {summary['top_five_hits']} correct drivers out of {summary['top_five_total']}",
+        f"Average error: {mean_error_label}{'' if mean_error is None else ' positions'}",
     ]
+
+
+def global_stat_metrics(index_document: dict) -> list[tuple[str, str]]:
+    """Return global History statistics formatted for metric cards."""
+    statistics = index_document["global_statistics"]
+    return [(label, f"{statistics[key] * 100:.1f}%") for key, label in GLOBAL_STATISTICS]
+
+
+def global_trend_rows(index_document: dict) -> list[dict]:
+    """Return cumulative History statistics in chart-ready percentages."""
+    return [
+        {
+            "Event": f"R{point['round']} {point['session_type'].title()}",
+            "Event order": event_order,
+            **{label: round(point[key] * 100, 1) for key, label in GLOBAL_STATISTICS},
+            MAE_LABEL: (
+                None
+                if point["mean_absolute_position_error"] is None
+                else round(point["mean_absolute_position_error"], 1)
+            ),
+        }
+        for event_order, point in enumerate(index_document["global_statistics"]["timeline"])
+    ]
+
+
+def accuracy_chart_spec(rows: list[dict]) -> dict:
+    """Return the percentage chart with an explicit chronological event order."""
+    event_labels = [row["Event"] for row in sorted(rows, key=lambda row: row["Event order"])]
+    statistic_labels = [label for _, label in GLOBAL_STATISTICS]
+    return {
+        "data": {"values": rows},
+        "transform": [{"fold": statistic_labels, "as": ["Metric", "Percentage"]}],
+        "mark": {"type": "line", "point": True},
+        "encoding": {
+            "x": {"field": "Event", "type": "ordinal", "sort": event_labels, "axis": {"title": None}},
+            "y": {
+                "field": "Percentage",
+                "type": "quantitative",
+                "scale": {"domain": [0, 100]},
+                "axis": {"title": None},
+            },
+            "color": {"field": "Metric", "type": "nominal", "sort": statistic_labels, "legend": {"title": None}},
+            "tooltip": [
+                {"field": "Event", "type": "nominal"},
+                {"field": "Metric", "type": "nominal"},
+                {"field": "Percentage", "type": "quantitative", "format": ".1f"},
+            ],
+        },
+        "height": 350,
+    }
+
+
+def mae_chart_spec(rows: list[dict]) -> dict:
+    """Return the cumulative MAE chart on its own position scale."""
+    event_labels = [row["Event"] for row in sorted(rows, key=lambda row: row["Event order"])]
+    return {
+        "data": {"values": rows},
+        "mark": {"type": "line", "point": True},
+        "encoding": {
+            "x": {"field": "Event", "type": "ordinal", "sort": event_labels, "axis": {"title": None}},
+            "y": {"field": MAE_LABEL, "type": "quantitative", "axis": {"title": MAE_LABEL}},
+            "tooltip": [
+                {"field": "Event", "type": "nominal"},
+                {"field": MAE_LABEL, "type": "quantitative", "format": ".1f"},
+            ],
+        },
+        "height": 220,
+    }
 
 
 def _format_datetime(value: str) -> str:
@@ -77,11 +152,20 @@ def render_history(client: PitWallApiClient) -> None:
         st.error("The published history is not available in a valid format.")
         return
 
+    if index_document.get("global_statistics") is not None:
+        for column, (label, value) in zip(st.columns(3), global_stat_metrics(index_document), strict=True):
+            column.metric(label, value)
+        trend_rows = global_trend_rows(index_document)
+        with st.expander("Performance over time", expanded=False):
+            st.vega_lite_chart(spec=accuracy_chart_spec(trend_rows), width="stretch")
+            st.vega_lite_chart(spec=mae_chart_spec(trend_rows), width="stretch")
+
     options = history_options(index_document)
     if not options:
         st.info("There are no completed races to compare yet.")
         return
 
+    st.header("Race predictions")
     selected_label = st.selectbox("Select a race", list(options), key="history_race")
     season, round_number, session_type = options[selected_label]
     try:
