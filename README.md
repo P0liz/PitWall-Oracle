@@ -89,7 +89,11 @@ For training, simulation, and workflow commands, see [INSTALL_RUN_BUILD.md](INST
 
 ## Repository Structure
 ```text
-src/            Data pipeline, feature engineering, ML models, simulation, and publication
+src/            Model training and simulation
+    data/       Data pipeline and feature engineering
+    dnf/        Logistic regressor for DNF predictions
+    publication/    Scheduling and generation of webapp data files
+    ranker/     XGBRanker training and optimization for Race predictions
 webapp/         FastAPI API, Streamlit interface, and published JSON artifacts
 scripts/        Prediction and post-race automation entry points
 models/         Ranker, DNF, and Monte Carlo artifacts
@@ -105,8 +109,16 @@ exercises/      Exploratory and learning work
 - A deployed ML project needs reproducible data contracts, model artifacts, and publication workflows; not only a trained model.
 - Product constraints can guide technical choices: Streamlit and FastAPI made it possible to ship a useful interface while keeping the stack focused on Python and data work.
 
-## Future Improvements
+## Current Status and Future Improvements
+The core of the project is complete: predictions for every new race will be published a few hours before the race.
+
+Future additions will be:
 - Compare PitWall Oracle forecasts with LLM-based and personal predictions.
 - Add next-race location, schedule, and countdown to the application.
 - Improve Head-to-Head visualisation.
 - Evaluate a more customized frontend (probably VUE with full deployment on Vercel) when the product needs it.
+
+## Contact info:
+*   **Developer**: Gabriele Polizzotto
+*   **Email**: polizzotto.gabriele7@gmail.com
+*   **LinkedIn**: [LinkedIn Profile](https://www.linkedin.com/in/gabriele-polizzotto-25376526a/)
