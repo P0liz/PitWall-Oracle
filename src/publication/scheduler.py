@@ -22,6 +22,15 @@ class DueOperation:
 
 
 def _event_sessions(row, season: int) -> tuple[tuple[SessionType, int, pd.Timestamp], ...]:
+    """
+    Associate sessions with their scheduled start times.
+    Args:
+        row: from event schedule of FastF1
+        season (int): year
+
+    Returns:
+        tuple[tuple[SessionType, int, pd.Timestamp], ...]: (session_type, session_number, start_date)
+    """
     is_conventional = str(row.EventFormat).lower() == "conventional"
     requested: list[tuple[SessionType, int]] = []
     if not is_conventional:
@@ -39,6 +48,21 @@ def _event_sessions(row, season: int) -> tuple[tuple[SessionType, int, pd.Timest
 def choose_due_operations(
     schedule: pd.DataFrame, now: datetime, data_root: Path, season: int, operation: OperationName | None = None
 ) -> tuple[DueOperation, ...]:
+    """
+    Determine which sessions of an event are due for publication.
+    Args:
+        schedule (pd.DataFrame): event schedule of FastF1
+        now (datetime): current time in UTC
+        data_root (Path): dir containing data files
+        season (int): year
+        operation (OperationName | None, optional): Defaults to None.
+
+    Raises:
+        ValueError: unsupported OperationName
+
+    Returns:
+        tuple[DueOperation]: due operations for current workflow
+    """
     if operation not in (None, "publish-prediction", "publish-actual"):
         raise ValueError(f"Unsupported publication operation filter: '{operation}'")
     data_root = Path(data_root)
@@ -62,7 +86,8 @@ def choose_due_operations(
             # may become available after the first prediction was generated.
             # Once the session starts, or once actual history exists, the
             # prediction is no longer eligible for automatic replacement.
-            elif not history.exists() and pd.Timedelta(0) <= until_start <= pd.Timedelta(hours=12):
+            # Prediction will be done between 0 and 15 hours before the race
+            elif not history.exists() and pd.Timedelta(0) <= until_start <= pd.Timedelta(hours=15):
                 due_predictions.append(
                     DueOperation("publish-prediction", season, round_number, session_type, session_number)
                 )
