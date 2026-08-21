@@ -1,130 +1,112 @@
-# PitWall-Oracle
+# PitWall Oracle
 
-Custom trained ML model to predict Formula 1 race outcomes.
+A machine-learning project, with a custom trained model, that predicts Formula 1 race outcomes before lights out.
 
-## Repository structure
+PitWall Oracle combines a learning-to-rank model, a separate DNF-probability model, and Monte Carlo simulation to turn pre-race information into predicted finishing orders.
 
+## [Live Demo](https://pitwall-oracle.streamlit.app/)
+[![PitWall Oracle web app preview](webapp/ui/assets/app-preview.jpeg)](https://pitwall-oracle.streamlit.app/)
+
+## Project Motivation
+Formula 1 predictions are often presented as simple driver rankings, even though a race outcome depends on connected uncertainties: driver form, race pace, circuit characteristics, starting position, reliability, and retirements.
+
+I wanted to explore this problem with a real machine-learning system rather than a one-off notebook. The goal is not to claim certainty about a race, but to produce a data-driven forecast before the event and make it accessible through a public web application.
+
+## What It Does
+- Predicts the classified finishing order for an upcoming Grand Prix.
+- Estimates each driver's probability of a DNF separately from the ranking.
+- Simulates many plausible race scenarios with Monte Carlo sampling.
+- Publishes predictions and compares them with actual results after a race.
+- Provides a Head-to-Head view for comparing two drivers.
+
+
+## Technical Choices
+
+### Ranking instead of ordinary regression
+Finishing position is relative: a driver's result is part of a race-wide ordering. The core model is therefore an `XGBRanker`, trained with one query group per race and evaluated race by race. Gradient-boosted decision trees were chosen because pre-race signals have nonlinear relationships: the value of qualifying pace, recent form, or circuit affinity can change with the team, driver, and track context. The model can learn these interactions without requiring them to be manually specified.
+
+Its ranking objective directly optimises the order within each race rather than the error on independent finishing-position estimates. Native handling of missing values and categorical circuit data also fits a historical motorsport dataset, where information is not always complete or uniformly available. The model uses a fixed, deliberate feature set and is tuned on expanding temporal folds, with early stopping to limit overfitting.
+
+### Separate DNF modelling
+A retirement affects the result differently from normal performance variation. PitWall Oracle models DNF probability with a separate logistic-regression model instead of mixing retirements into the ranking target. This is a binary, low-frequency event, so the model is designed to return a calibrated probability rather than a second performance score.
+
+The DNF pipeline median-imputes missing values, standardises the selected features, and fits a regularised logistic regression with class weighting for the minority DNF class. This deliberately compact architecture is easier to calibrate and inspect than a more complex model when the number of retirement examples is limited. Optuna selects the feature subset, regularisation strength, penalty, and class weight on temporal development folds, using Brier score to prioritise probability quality.
+
+### Monte Carlo simulation
+The ranker and DNF probabilities are combined in a Monte Carlo simulator. This produces a set of plausible race outcomes rather than only one deterministic classification.
+
+### Causal historical features
+Pre-race features use information strictly preceding the target race. Driver and team encodings follow the same temporal rule, preventing current or future results from leaking into a prediction.
+
+### Lightweight product architecture
 ```text
-PitWall-Oracle/
-|-- src/          Data pipeline, ranking and DNF models, simulation, and publication logic
-|-- scripts/      Automation entry points for prediction and post-race workflows
-|-- webapp/       FastAPI backend, Streamlit UI, and published JSON data
-|-- data_files/   Cached datasets and starting grids
-|-- models/       Ranker, DNF, and Monte Carlo calibration artifacts
-|-- tests/        Unit and regression tests
-|-- exercises/    Exploratory and learning scripts
+Historical data (Bronze and Silver layers)
+    ↓
+Feature engineering (Gold layer)
+    ↓
+XGBRanker + DNF model (Training and Optimization)
+    ↓
+Monte Carlo simulation (Compute probabilities)
+    ↓
+Validated JSON publication (GitHub Actions)
+    ↓
+FastAPI (Vercel) → Streamlit interface
 ```
 
-## Web app
+The hosted application is read-only: it serves precomputed, validated JSON artifacts rather than training models or fetching race data at request time.
 
-The public app serves precomputed PitWall Oracle results through a read-only
-FastAPI API and presents them in Streamlit. The hosted services only read the
-validated JSON published in [`webapp/api/data`](webapp/api/data).
+The training of the models and production of JSON files containing the data to display are done inside the GitHub repository via Actions.
 
-The UI separates the next-race prediction and Head-to-Head tool from the
-historical predicted-versus-real comparison.
+## Model Evaluation
+The ranker is evaluated on future Grands Prix using expanding temporal folds. Its primary metric is mean race-level pairwise accuracy across the full classified grid. Teammate pairwise accuracy, mean absolute position error, NDCG, and top-k overlap are reported as additional diagnostics.
 
-GitHub Actions automatically publishes due Sprint and Grand Prix predictions,
-adds completed-session results to the history, and retrains the Ranker and DNF
-models after newly published Grands Prix.
+The DNF model is evaluated separately on future Grands Prix because it solves a probability-estimation problem rather than a ranking problem. Brier score is used as the primary selection metric, measuring the squared error of the predicted probabilities. Log loss is reported alongside it as an additional diagnostic.
 
-Streamlit was chosen because the current interface is small and primarily
-data-driven. It keeps the web layer in Python and avoids introducing a separate
-frontend stack before the product requires deeper visual customization. The
-FastAPI boundary leaves room to replace the UI independently in the future.
+Sprint sessions are excluded from the primary model evaluation. Their shorter distance generally reduces exposure to reliability failures, tyre degradation, pit-stop strategy, and other effects that shape a full Grand Prix, but this does not necessarily make every Sprint easier to predict: the format can also be more volatile. The stronger reason for excluding them is that they represent a different race distribution from the project's main prediction target. Mixing Sprint and Grand Prix results would make the headline metrics less representative.
+DNF and Monte Carlo evaluation remain intentionally separate from ranker selection.
 
-Install the small web-app dependencies in the local virtual environment:
+## Quick Start
+Install the project and web-app dependencies in a Python 3.12+ environment:
 
 ```powershell
-.\venv\Scripts\python.exe -m pip install -r webapp\requirements.txt
-.\venv\Scripts\python.exe -m pip install -r webapp\ui\requirements.txt
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Start the API in one PowerShell terminal:
+Start the API:
 
 ```powershell
 .\venv\Scripts\python.exe -m uvicorn webapp.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Then start Streamlit from the repository root in a second terminal:
+Start the interface:
 
 ```powershell
 $env:PITWALL_API_URL = "http://127.0.0.1:8000"
-.\venv\Scripts\python.exe -m streamlit run webapp/ui/streamlit_app.py
+.\venv\Scripts\python.exe -m streamlit run webapp\ui\streamlit_app.py
 ```
 
-The webapp is deployed via streamlit and accessible at [PitWall Oracle](https://pitwall-oracle.streamlit.app/)
+For training, simulation, and workflow commands, see [INSTALL_RUN_BUILD.md](INSTALL_RUN_BUILD.md).
 
-It is possibile that the page is **sleeping** (cause of Streamlit Community Cloud policy), so just press the button to wake it up and wait a few seconds before refreshing the page.
-
-<!--
-For details, see the [web-app design](docs/superpowers/specs/2026-08-08-web-app-design.md)
-and [implementation plan](docs/superpowers/plans/2026-08-08-web-app-mvp.md).
-The implementation is organised around the [API app](webapp/api/app.py),
-[data contracts](webapp/api/schemas.py), [JSON repository](webapp/api/repository.py),
-and [Streamlit entry point](webapp/ui/streamlit_app.py).
--->
-
-
-## Ranker training and evaluation
-
-The ranker uses the explicit `PRODUCTION_FEATURES` tuple in
-`src/ranker/ranker_features.py`; feature subsets are no longer selected by a separate
-combinatorial pipeline.
-
-Run the optimized training workflow with:
-
-```powershell
-.\venv\Scripts\python.exe -m src.train_ranker_optimized
+## Repository Structure
+```text
+src/            Data pipeline, feature engineering, ML models, simulation, and publication
+webapp/         FastAPI API, Streamlit interface, and published JSON artifacts
+scripts/        Prediction and post-race automation entry points
+models/         Ranker, DNF, and Monte Carlo artifacts
+data_files/     Cached datasets and starting-grid data
+tests/          Unit and regression tests
+exercises/      Exploratory and learning work
 ```
 
-Optuna tunes model parameters on expanding temporal folds. Its primary score is
-mean race-level pairwise accuracy over the full classified grid. The dynamic
-champion/challenger evaluation additionally requires no regression in teammate
-pairwise accuracy or mean absolute position error. NDCG and top-k overlap remain
-diagnostic metrics. Sprint queries are excluded from ranker training and primary
-evaluation; DNF and Monte Carlo evaluation are separate workflows.
+## What I Learned
+- Ranking problems need ranking-aware training and race-level evaluation; a standard regression metric alone does not describe prediction quality.
+- Temporal leakage is easy to introduce in sports data and can invalidate an otherwise polished ML workflow.
+- Separating performance prediction from failure probability produces a clearer system design and a more meaningful simulation.
+- A deployed ML project needs reproducible data contracts, model artifacts, and publication workflows; not only a trained model.
+- Product constraints can guide technical choices: Streamlit and FastAPI made it possible to ship a useful interface while keeping the stack focused on Python and data work.
 
-Promotion intentionally uses only the latest out-of-sample Grand Prix. Earlier
-regressions are not accumulated over a rolling window, so they cannot prevent a
-challenger that improves the latest race, without regressing any current
-scorecard metric, from being promoted. 
-
-## DNF model and simulation
-
-`src/train_dnf_optimized.py` is the single DNF training and optimization workflow.
-It uses `LogisticRegression`; Optuna jointly selects the feature subset and
-hyperparameters on expanding temporal folds, followed by a separate
-out-of-sample holdout evaluation.
-
-Optimization intentionally differs between the two models. The nonlinear
-`XGBRanker` uses a fixed production feature set because independently toggling
-30+ correlated inputs would create a very large, unstable search space; ranker
-feature changes are therefore evaluated as explicit ablation challengers on
-the same temporal folds. The DNF model is a linear logistic regression with a
-smaller candidate registry, so Optuna can reasonably treat feature inclusion
-as a boolean hyperparameter alongside regularization and class weighting.
-In both workflows, feature or parameter selection uses development folds only;
-the out-of-sample period remains separate from selection.
-
-Train the DNF model with:
-
-```powershell
-.\venv\Scripts\python.exe -m src.train_dnf_optimized
-```
-
-The Monte Carlo simulator combines the ranker with the logistic DNF model. A
-missing or incompatible logistic artifact produces an explicit error; the
-simulator does not fall back to an alternative probability method.
-
-Run a simulation with:
-
-```powershell
-.\venv\Scripts\python.exe -m src.monte_carlo_simulator --year 2026 --race 10
-```
-
-## Future improvements:
- - Add some sort of comparision with chat gpt or gemini (maybe via api key), for the prediction, to see who did better.
- - In the next race window add when and where the next race will be, plus a countdown.
- - Display also the matrix for head to head in some way.
- - Improve frontend by switching to Vue to realize a proper webapp (deployment on Vercel)
+## Future Improvements
+- Compare PitWall Oracle forecasts with LLM-based and personal predictions.
+- Add next-race location, schedule, and countdown to the application.
+- Improve Head-to-Head visualisation.
+- Evaluate a more customized frontend (probably VUE with full deployment on Vercel) when the product needs it.
