@@ -198,6 +198,13 @@ class PublicationPipelineTests(unittest.TestCase):
             archive = data_root / "predictions" / "2026" / "round-01-race.json"
             archive.parent.mkdir(parents=True, exist_ok=True)
             archive.write_text("{}", encoding="utf-8")
+            refresh_operations = choose_due_operations(
+                schedule, datetime(2026, 3, 8, 12, 30, tzinfo=timezone.utc), data_root, 2026
+            )
+            self.assertEqual(
+                tuple((item.operation, item.session_type) for item in refresh_operations),
+                (("publish-prediction", "race"),),
+            )
             self.assertEqual(
                 choose_due_operations(schedule, datetime(2026, 3, 9, 12, 59, 59, tzinfo=timezone.utc), data_root, 2026),
                 (),
@@ -221,6 +228,13 @@ class PublicationPipelineTests(unittest.TestCase):
             with self.assertRaises(PublicationError):
                 publish_prediction_document(prediction, data_root, dry_run=False)
 
+            refreshed = prediction.model_copy(deep=True)
+            refreshed.publication.generated_at = datetime(2026, 3, 8, 2, tzinfo=timezone.utc)
+            refresh_summary = publish_prediction_document(refreshed, data_root, dry_run=False, allow_replace=True)
+            self.assertEqual(refresh_summary.status, "published")
+            self.assertIn('"generated_at": "2026-03-08T02:00:00Z"', prediction_path.read_text(encoding="utf-8"))
+            refreshed_bytes = prediction_path.read_bytes()
+
             history = build_history_document(
                 prediction,
                 official_results(),
@@ -228,7 +242,7 @@ class PublicationPipelineTests(unittest.TestCase):
                 prediction_path="predictions/2026/round-01-race.json",
             )
             publish_history_document(history, data_root, dry_run=False)
-            self.assertEqual(prediction_path.read_bytes(), before)
+            self.assertEqual(prediction_path.read_bytes(), refreshed_bytes)
 
             sprint = prediction_document("sprint")
             publish_prediction_document(sprint, data_root, dry_run=False)

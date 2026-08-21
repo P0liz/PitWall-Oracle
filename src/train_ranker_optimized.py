@@ -1,10 +1,11 @@
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from src.data.gold_layer import GoldLayer
-from src.ranker.ranker_model import (
-    DynamicTraining,
-    StaticTraining,
-    select_model_feature_frame,
-    sort_ranking_frame,
-)
+from src.ranker.ranker_model import DynamicTraining, StaticTraining, select_model_feature_frame, sort_ranking_frame
 from src.ranker.ranker_optimization import FIXED_PARAMS, run_hpo_optuna
 from src.data.data_loader import DataLoader, NEW_YEAR, CATEGORICAL_COLS
 from src.config import DEFAULT_DECAY_RATE, to_log_ranker, TARGET_MULTIPLIER, RANKER_OPTUNA_TRIALS, FALLBACK_SIGMA

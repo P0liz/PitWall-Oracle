@@ -1,3 +1,8 @@
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from xgboost import XGBRanker
 
 from src.ranker.ranker_model import select_model_feature_frame
@@ -6,8 +11,8 @@ from src.data.data_loader import DataLoader
 from src.config import NEW_YEAR
 from src.ranker.ranker_model_loader import resolve_ranker_model_path
 
-PREDICT_RACE = 11  # numero gara da predire
-RACE_SESSION = 5
+PREDICT_RACE = 12  # numero gara da predire
+RACE_SESSION = 3
 
 
 def main():

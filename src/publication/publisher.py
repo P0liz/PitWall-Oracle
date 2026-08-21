@@ -42,10 +42,7 @@ def _replace_bytes(path: Path, content: bytes) -> None:
 
 
 def publish_prediction_document(
-    document: PredictionDocument,
-    data_root: Path,
-    *,
-    dry_run: bool,
+    document: PredictionDocument, data_root: Path, *, dry_run: bool, allow_replace: bool = False
 ) -> PublicationSummary:
     data_root = Path(data_root)
     season, round_number = document.race.season, document.race.round
@@ -54,7 +51,7 @@ def publish_prediction_document(
     relative_pointer = "predictions/current.json"
     archive = data_root / relative_archive
     pointer = data_root / relative_pointer
-    if archive.exists():
+    if archive.exists() and not allow_replace:
         raise PublicationError(f"Prediction archive already exists: '{relative_archive}'")
 
     archive_content = _serialized(document)
@@ -76,12 +73,16 @@ def publish_prediction_document(
     if dry_run:
         return summary
 
+    previous_archive = archive.read_bytes() if archive.exists() else None
     previous_pointer = pointer.read_bytes() if pointer.exists() else None
     try:
         _replace_bytes(archive, archive_content)
         _replace_bytes(pointer, pointer_content)
     except Exception as error:
-        archive.unlink(missing_ok=True)
+        if previous_archive is None:
+            archive.unlink(missing_ok=True)
+        else:
+            _replace_bytes(archive, previous_archive)
         if previous_pointer is None:
             pointer.unlink(missing_ok=True)
         else:
@@ -90,12 +91,7 @@ def publish_prediction_document(
     return summary
 
 
-def publish_history_document(
-    document: HistoryDocument,
-    data_root: Path,
-    *,
-    dry_run: bool,
-) -> PublicationSummary:
+def publish_history_document(document: HistoryDocument, data_root: Path, *, dry_run: bool) -> PublicationSummary:
     data_root = Path(data_root)
     season, round_number = document.race.season, document.race.round
     session_type = document.race.session_type

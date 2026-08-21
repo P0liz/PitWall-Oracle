@@ -94,6 +94,7 @@ def _execute(
     simulations: int,
     seed: int,
     force_refresh: bool,
+    allow_prediction_replace: bool = False,
 ) -> PublicationSummary:
     if operation.operation == "publish-prediction":
         document = _prediction_document(
@@ -105,7 +106,7 @@ def _execute(
             seed,
             force_refresh,
         )
-        return publish_prediction_document(document, data_root, dry_run=dry_run)
+        return publish_prediction_document(document, data_root, dry_run=dry_run, allow_replace=allow_prediction_replace)
     if operation.operation == "publish-actual":
         document = _history_document(
             operation.season,
@@ -193,7 +194,8 @@ def main(
                     dry_run=args.dry_run,
                     simulations=args.simulations,
                     seed=args.seed,
-                    force_refresh=args.force_refresh,
+                    force_refresh=args.force_refresh or (automatic and operation.operation == "publish-prediction"),
+                    allow_prediction_replace=automatic and operation.operation == "publish-prediction",
                 )
             )
         except ResultsNotReadyError as error:

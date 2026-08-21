@@ -58,7 +58,11 @@ def choose_due_operations(
 
             if prediction.is_file() and not history.is_file() and now_utc >= start + pd.Timedelta(hours=24):
                 due_actuals.append(DueOperation("publish-actual", season, round_number, session_type, session_number))
-            elif not prediction.exists() and pd.Timedelta(0) <= until_start <= pd.Timedelta(hours=12):
+            # Keep the pre-session window refreshable: the FIA provisional grid
+            # may become available after the first prediction was generated.
+            # Once the session starts, or once actual history exists, the
+            # prediction is no longer eligible for automatic replacement.
+            elif not history.exists() and pd.Timedelta(0) <= until_start <= pd.Timedelta(hours=12):
                 due_predictions.append(
                     DueOperation("publish-prediction", season, round_number, session_type, session_number)
                 )

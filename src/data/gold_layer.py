@@ -4,7 +4,13 @@ import pandas as pd
 from pathlib import Path
 from src.config import *
 from src.dnf.dnf_features import DNF_CANDIDATE_FEATURES
-from src.utils import setup_custom_logger, got_end_penalty, is_race_dnf, get_session_mapping, POST_RACE_EXCLUSION_STATUSES
+from src.utils import (
+    setup_custom_logger,
+    got_end_penalty,
+    is_race_dnf,
+    get_session_mapping,
+    POST_RACE_EXCLUSION_STATUSES,
+)
 from .silver_layer import SilverLayer
 from .history_builder import HistoryBuilder
 from .feature_engineer import FeatureEngineering
@@ -44,7 +50,7 @@ class GoldLayer:
         return results
 
     # Does not use race_results, only for predictions
-    def build_prediction_features(self, year: int, race_number: int, session: int, force: bool = False):
+    def build_prediction_features(self, year: int, race_number: int, session: int, force: bool = True):
         assert year >= 2024, "Predictions only on 2024+ seasons"
         assert 1 <= race_number <= 24, f"Race number {race_number} does not exist: max 24 races"
         assert session in [3, 5], "Predictions only on race sessions"
@@ -115,7 +121,9 @@ class GoldLayer:
         quali_results_df = silver.get_clean_results(year, race_number, quali_session, force)
         race_session = get_session_mapping(year, is_conventional, race_type, "race")
         race_date = event[f"Session{race_session}Date"].iloc[0]
-        race_results_df = silver.get_clean_results(year, race_number, race_session, force)
+        race_results_df = (
+            silver.get_clean_results(year, race_number, race_session, force) if not prediction_mode else pd.DataFrame()
+        )
         raw_race_laps_df = (
             silver.get_untouched_laps(year, race_number, race_session, force) if not prediction_mode else pd.DataFrame()
         )
