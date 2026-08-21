@@ -167,8 +167,8 @@ class PublicationPipelineTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             data_root = Path(temp_dir)
             cases = (
-                (datetime(2026, 3, 7, 0, 59, 59, tzinfo=timezone.utc), ()),
-                (datetime(2026, 3, 7, 1, tzinfo=timezone.utc), ("sprint",)),
+                (datetime(2026, 3, 6, 21, 59, 59, tzinfo=timezone.utc), ()),
+                (datetime(2026, 3, 6, 22, tzinfo=timezone.utc), ("sprint",)),
                 (datetime(2026, 3, 8, 1, tzinfo=timezone.utc), ("race",)),
             )
             for now, expected in cases:
