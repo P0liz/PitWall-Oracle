@@ -10,8 +10,8 @@
   },
   "publication": {
     "type": "live",
-    "generated_at": "2026-08-21T18:59:17.091627Z",
-    "data_cutoff": "2026-08-21T18:59:17.091627Z",
+    "generated_at": "2026-08-21T22:50:20.873172Z",
+    "data_cutoff": "2026-08-21T22:50:20.873172Z",
     "model_artifact": "pitwall_oracle_2026_11.json",
     "dnf_strategy": "logistic",
     "simulations": 10000,
