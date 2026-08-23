@@ -22,6 +22,7 @@ def _load_data_with_retry(
     un'eccezione su session.load() stesso.
     """
     last_error = None
+    fastf1.set_log_level("DEBUG")
     for attempt in range(1, max_attempts + 1):
         session.load(**load_kwargs)
         try:

@@ -47,6 +47,18 @@ Run the DNF workflow:
 .\venv\Scripts\python.exe -m src.monte_carlo_simulator --year 2026 --race 10
 ```
 
+## Run complete prediction generation workflow
+
+```powershell
+python scripts/generate_web_result.py --operation auto --auto-kind prediction --publish
+```
+
+## Run complete history publication workflow
+
+```powershell
+python scripts/generate_web_result.py --operation auto --auto-kind actual --publish
+```
+
 ## Notes
 
 - Gold data is cached under `data_files/gold`; rebuild affected data after a Gold-feature change before retraining.

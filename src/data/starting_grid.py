@@ -188,17 +188,19 @@ class StartingGridResolver:
     def _resolve_fia(self, event_name: str, sprint: bool, qualifying: pd.DataFrame) -> ResolvedGrid | None:
         event_url = f"{FIA_CHAMPIONSHIP_URL}/{quote(event_name)}"
         try:
-            response = self.http_get(event_url, timeout=20, headers={"User-Agent": "PitWall-Oracle/1.0"})
+            response = self.http_get(event_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
             response.raise_for_status()
             pdf_url = find_provisional_grid_pdf(response.text, sprint=sprint)
             if pdf_url is None:
                 return None
-            pdf_response = self.http_get(pdf_url, timeout=20, headers={"User-Agent": "PitWall-Oracle/1.0"})
+            pdf_response = self.http_get(pdf_url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
             pdf_response.raise_for_status()
             numbered_grid = self.pdf_parser(pdf_response.content)
             positions = self._map_car_numbers(numbered_grid, qualifying)
             return ResolvedGrid(positions, "fia_provisional", pdf_url)
-        except (requests.RequestException, KeyError, TypeError, ValueError):
+        except (requests.RequestException, KeyError, TypeError, ValueError) as exception:
+            log.error(type(exception).__name__)
+            log.error(exception.response.status_code)
             return None
 
     @staticmethod
