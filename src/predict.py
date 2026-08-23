@@ -12,7 +12,7 @@ from src.config import NEW_YEAR
 from src.ranker.ranker_model_loader import resolve_ranker_model_path
 
 PREDICT_RACE = 12  # numero gara da predire
-RACE_SESSION = 3
+RACE_SESSION = 5
 
 
 def main():

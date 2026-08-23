@@ -94,10 +94,12 @@ TEAM_ID_MAPPING = {
     "Aston Martin": "aston_martin_lineage",
     "Renault": "alpine_lineage",
     "Alpine": "alpine_lineage",
+    "Alpine F1 Team": "alpine_lineage",
     "Red Bull": "red_bull_lineage",
     "Red Bull Racing": "red_bull_lineage",
     "Racing Bulls": "vcarb_lineage",
     "RB": "vcarb_lineage",
+    "RB F1 Team": "vcarb_lineage",
     "AlphaTauri": "vcarb_lineage",
     "Scuderia Ferrari": "ferrari_lineage",
     "Ferrari": "ferrari_lineage",
@@ -107,6 +109,7 @@ TEAM_ID_MAPPING = {
     "Haas F1 Team": "haas_lineage",
     "Audi": "audi_lineage",
     "Cadillac": "cadillac_lineage",
+    "Cadillac F1 Team": "cadillac_lineage",
     "": "unknown",
 }
 

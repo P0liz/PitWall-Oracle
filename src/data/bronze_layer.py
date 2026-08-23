@@ -4,6 +4,42 @@ import os
 from pathlib import Path
 import requests
 from src.config import ARCHIVE_URL, DATA_DIR, FORECAST_URL
+from src.utils import setup_custom_logger
+
+import time
+from fastf1.exceptions import DataNotLoadedError
+
+log = setup_custom_logger("DataLoader")
+
+
+def _load_data_with_retry(
+    session, required_attr: str, max_attempts: int = 3, base_delay_seconds: float = 60.0, **load_kwargs
+):
+    """
+    Carica una sessione FastF1 con retry: FastF1 non solleva eccezioni sui
+    singoli fetch falliti (solo warning), quindi il controllo di successo
+    reale avviene leggendo `required_attr` dopo il load, non catturando
+    un'eccezione su session.load() stesso.
+    """
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        session.load(**load_kwargs)
+        try:
+            data = getattr(session, required_attr)
+            if data is not None and len(data) > 0:
+                return session
+        except DataNotLoadedError as error:
+            last_error = error
+
+        if attempt < max_attempts:
+            delay = base_delay_seconds * attempt  # backoff lineare/esponenziale a scelta
+            log.warning(
+                f"Tentativo {attempt}/{max_attempts} fallito nel caricare "
+                f"'{required_attr}', ritento tra {delay:.0f}s"
+            )
+            time.sleep(delay)
+
+    raise RuntimeError(f"Impossibile caricare '{required_attr}' dopo {max_attempts} tentativi") from last_error
 
 
 class BronzeLayer:
@@ -22,7 +58,7 @@ class BronzeLayer:
         else:
             # Load from API
             data = fastf1.get_session(year, race_number, session)
-            data.load()
+            _load_data_with_retry(data, required_attr="laps")
             laps = data.laps
             df = pd.DataFrame(data=laps).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
@@ -36,7 +72,7 @@ class BronzeLayer:
         else:
             # Load from API
             data = fastf1.get_session(year, race_number, session)
-            data.load()
+            _load_data_with_retry(data, required_attr="results")
             results = data.results
             df = pd.DataFrame(data=results).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
@@ -72,7 +108,7 @@ class BronzeLayer:
         else:
             # Load from API
             data = fastf1.get_session(year, race_number, 1)
-            data.load()
+            _load_data_with_retry(data, required_attr="event")
             df = pd.DataFrame([data.event]).reset_index(drop=True)
             df.to_parquet(self.data_dir / filename)
         return df

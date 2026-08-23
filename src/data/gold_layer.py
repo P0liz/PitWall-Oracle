@@ -54,22 +54,27 @@ class GoldLayer:
         assert year >= 2024, "Predictions only on 2024+ seasons"
         assert 1 <= race_number <= 24, f"Race number {race_number} does not exist: max 24 races"
         assert session in [3, 5], "Predictions only on race sessions"
-        event = self.silver.get_clean_event_metadata(year, race_number, force)
-        is_conventional = event["EventFormat"].iloc[0] == "conventional"
-        race_type = "sr" if session <= 4 else "gp"
-        quali_session = get_session_mapping(year, is_conventional, race_type, "quali")
-        quali_results = self.silver.get_clean_results(year, race_number, quali_session, force)
-        resolved_grid = self.starting_grid_resolver.resolve(
-            year, race_number, session, event["EventName"].iloc[0], quali_results, force=force
-        )
+        try:
+            self.log.info(f"Building prediction features for {year} Grand Prix #{race_number}, session {session}...")
+            event = self.silver.get_clean_event_metadata(year, race_number, force)
+            is_conventional = event["EventFormat"].iloc[0] == "conventional"
+            race_type = "sr" if session <= 4 else "gp"
+            quali_session = get_session_mapping(year, is_conventional, race_type, "quali")
+            quali_results = self.silver.get_clean_results(year, race_number, quali_session, force)
+            resolved_grid = self.starting_grid_resolver.resolve(
+                year, race_number, session, event["EventName"].iloc[0], quali_results, force=force
+            )
 
-        results = self.get_gp_features(
-            event, year, race_number, session, force, prediction_mode=True, prediction_grid=resolved_grid.positions
-        )
-        results.attrs["grid_source"] = resolved_grid.source
-        results.attrs["grid_source_url"] = resolved_grid.source_url
-        results.to_parquet(self.data_dir / f"latest_race_pred.parquet", index=False)
-        return results
+            results = self.get_gp_features(
+                event, year, race_number, session, force, prediction_mode=True, prediction_grid=resolved_grid.positions
+            )
+            results.attrs["grid_source"] = resolved_grid.source
+            results.attrs["grid_source_url"] = resolved_grid.source_url
+            results.to_parquet(self.data_dir / f"latest_race_pred.parquet", index=False)
+            return results
+        except Exception as e:
+            self.log.error(f"Error in building prediction features: {e}")
+            raise e
 
     def get_features(
         self,
