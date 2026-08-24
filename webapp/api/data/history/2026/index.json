@@ -105,6 +105,14 @@
       "session_type": "race",
       "name": "Hungarian Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 12,
+      "session_type": "sprint",
+      "name": "Dutch Grand Prix",
+      "publication_type": "live"
     }
-  ]
+  ],
+  "global_statistics": null
 }
