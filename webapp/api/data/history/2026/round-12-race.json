@@ -1,0 +1,318 @@
+{
+  "schema_version": "1.0",
+  "race": {
+    "season": 2026,
+    "round": 12,
+    "session_type": "race",
+    "name": "Dutch Grand Prix",
+    "circuit": "Zandvoort",
+    "start_time": "2026-08-23T13:00:00Z"
+  },
+  "prediction_path": "predictions/2026/round-12-race.json",
+  "publication": {
+    "type": "live",
+    "generated_at": "2026-08-23T12:58:05.643165Z",
+    "data_cutoff": "2026-08-23T12:58:05.643165Z",
+    "model_artifact": "pitwall_oracle_2026_11.json",
+    "dnf_strategy": "logistic",
+    "simulations": 10000,
+    "seed": 2003
+  },
+  "actual_results": [
+    {
+      "driver_id": "nor_lando_norris",
+      "actual_position": 1,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "rus_george_russell",
+      "actual_position": 3,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "ant_kimi_antonelli",
+      "actual_position": 2,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "pia_oscar_piastri",
+      "actual_position": 6,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "ham_lewis_hamilton",
+      "actual_position": 4,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "lec_charles_leclerc",
+      "actual_position": 5,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "ver_max_verstappen",
+      "actual_position": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "law_liam_lawson",
+      "actual_position": 7,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "lin_arvid_lindblad",
+      "actual_position": 12,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "bor_gabriel_bortoleto",
+      "actual_position": 13,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "gas_pierre_gasly",
+      "actual_position": 10,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "tsu_yuki_tsunoda",
+      "actual_position": 11,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "hul_nico_hulkenberg",
+      "actual_position": 8,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "col_franco_colapinto",
+      "actual_position": 14,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "oco_esteban_ocon",
+      "actual_position": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "bea_oliver_bearman",
+      "actual_position": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "sai_carlos_sainz",
+      "actual_position": 16,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "alo_fernando_alonso",
+      "actual_position": 9,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "alb_alexander_albon",
+      "actual_position": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "str_lance_stroll",
+      "actual_position": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "bot_valtteri_bottas",
+      "actual_position": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "per_sergio_perez",
+      "actual_position": 15,
+      "status": "Lapped"
+    }
+  ],
+  "comparisons": [
+    {
+      "driver_id": "nor_lando_norris",
+      "display_name": "Lando Norris",
+      "predicted_position": 1,
+      "actual_position": 1,
+      "position_difference": 0,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "rus_george_russell",
+      "display_name": "George Russell",
+      "predicted_position": 2,
+      "actual_position": 3,
+      "position_difference": 1,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "ant_kimi_antonelli",
+      "display_name": "Kimi Antonelli",
+      "predicted_position": 3,
+      "actual_position": 2,
+      "position_difference": -1,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "pia_oscar_piastri",
+      "display_name": "Oscar Piastri",
+      "predicted_position": 4,
+      "actual_position": 6,
+      "position_difference": 2,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "ham_lewis_hamilton",
+      "display_name": "Lewis Hamilton",
+      "predicted_position": 5,
+      "actual_position": 4,
+      "position_difference": -1,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "lec_charles_leclerc",
+      "display_name": "Charles Leclerc",
+      "predicted_position": 6,
+      "actual_position": 5,
+      "position_difference": -1,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "ver_max_verstappen",
+      "display_name": "Max Verstappen",
+      "predicted_position": 7,
+      "actual_position": null,
+      "position_difference": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "law_liam_lawson",
+      "display_name": "Liam Lawson",
+      "predicted_position": 8,
+      "actual_position": 7,
+      "position_difference": -1,
+      "status": "Finished"
+    },
+    {
+      "driver_id": "lin_arvid_lindblad",
+      "display_name": "Arvid Lindblad",
+      "predicted_position": 9,
+      "actual_position": 12,
+      "position_difference": 3,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "bor_gabriel_bortoleto",
+      "display_name": "Gabriel Bortoleto",
+      "predicted_position": 10,
+      "actual_position": 13,
+      "position_difference": 3,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "gas_pierre_gasly",
+      "display_name": "Pierre Gasly",
+      "predicted_position": 11,
+      "actual_position": 10,
+      "position_difference": -1,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "tsu_yuki_tsunoda",
+      "display_name": "Yuki Tsunoda",
+      "predicted_position": 12,
+      "actual_position": 11,
+      "position_difference": -1,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "hul_nico_hulkenberg",
+      "display_name": "Nico Hulkenberg",
+      "predicted_position": 13,
+      "actual_position": 8,
+      "position_difference": -5,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "col_franco_colapinto",
+      "display_name": "Franco Colapinto",
+      "predicted_position": 14,
+      "actual_position": 14,
+      "position_difference": 0,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "oco_esteban_ocon",
+      "display_name": "Esteban Ocon",
+      "predicted_position": 15,
+      "actual_position": null,
+      "position_difference": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "bea_oliver_bearman",
+      "display_name": "Oliver Bearman",
+      "predicted_position": 16,
+      "actual_position": null,
+      "position_difference": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "sai_carlos_sainz",
+      "display_name": "Carlos Sainz",
+      "predicted_position": 17,
+      "actual_position": 16,
+      "position_difference": -1,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "alo_fernando_alonso",
+      "display_name": "Fernando Alonso",
+      "predicted_position": 18,
+      "actual_position": 9,
+      "position_difference": -9,
+      "status": "Lapped"
+    },
+    {
+      "driver_id": "alb_alexander_albon",
+      "display_name": "Alexander Albon",
+      "predicted_position": 19,
+      "actual_position": null,
+      "position_difference": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "str_lance_stroll",
+      "display_name": "Lance Stroll",
+      "predicted_position": 20,
+      "actual_position": null,
+      "position_difference": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "bot_valtteri_bottas",
+      "display_name": "Valtteri Bottas",
+      "predicted_position": 21,
+      "actual_position": null,
+      "position_difference": null,
+      "status": "Retired"
+    },
+    {
+      "driver_id": "per_sergio_perez",
+      "display_name": "Sergio Perez",
+      "predicted_position": 22,
+      "actual_position": 15,
+      "position_difference": -7,
+      "status": "Lapped"
+    }
+  ],
+  "summary": {
+    "mean_absolute_position_error": 2.3125,
+    "podium_hits": 3,
+    "podium_total": 3,
+    "top_five_hits": 4,
+    "top_five_total": 5
+  }
+}
