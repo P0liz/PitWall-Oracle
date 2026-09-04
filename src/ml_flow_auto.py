@@ -70,7 +70,7 @@ def launch_mlflow_server(host=MLFLOW_HOST, port=MLFLOW_PORT):
             shell=use_shell,
         )
     except Exception as e:
-        print(f"[❌] Errore critico durante il boot del server: {e}")
+        print(f"Errore critico durante il boot del server: {e}")
         print("Assicurati di aver attivato l'ambiente virtuale con 'venv\\Scripts\\activate'!")
         sys.exit(1)
 
@@ -83,7 +83,7 @@ def launch_mlflow_server(host=MLFLOW_HOST, port=MLFLOW_PORT):
             return process
         print(f"    - In attesa che il server risponda... ({i+1}/{max_retries})")
 
-    print("[❌] Errore critico: Il server MLflow non è partito nei tempi previsti.")
+    print("Errore critico: Il server MLflow non è partito nei tempi previsti.")
     print("Controlla il file 'mlflow_server_boot.log' per analizzare il problema.")
     process.terminate()
     sys.exit(1)

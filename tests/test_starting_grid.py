@@ -117,7 +117,7 @@ class GoldPredictionGridTests(unittest.TestCase):
         event = pd.DataFrame({"EventFormat": ["conventional"], "EventName": ["Hungarian Grand Prix"]})
         qualifying = StartingGridResolverTests.qualifying()
         resolved_positions = {"nor_lando_norris": 2.0, "pia_oscar_piastri": 1.0, "ver_max_verstappen": 3.0}
-        gold = GoldLayer.__new__(GoldLayer)
+        gold = GoldLayer()
         gold.data_dir = Path("unused")
         gold.silver = Mock()
         gold.silver.get_clean_event_metadata.return_value = event

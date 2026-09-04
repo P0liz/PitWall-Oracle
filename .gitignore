@@ -225,3 +225,5 @@ mlflow.db
 # Custom
 results/
 docs/
+logs/
+.locks/

@@ -1,9 +1,13 @@
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import asyncio
 from dataclasses import dataclass
 import hashlib
-import os
 import shutil
-import sys
 import traceback
 from pathlib import Path
 
@@ -15,7 +19,12 @@ import pandas as pd
 from src.ml_flow_auto import MLFLOW_HOST, MLFLOW_PORT, launch_mlflow_server
 from src.config import DNF_OPTUNA_TRIALS, to_log_dnf
 from src.data.data_loader import DataLoader, NEW_YEAR
-from src.dnf.dnf_metrics import DNFProbabilityMetrics, DNFPromotionDecision, decide_dnf_promotion, score_dnf_probabilities
+from src.dnf.dnf_metrics import (
+    DNFProbabilityMetrics,
+    DNFPromotionDecision,
+    decide_dnf_promotion,
+    score_dnf_probabilities,
+)
 from src.dnf.dnf_model import (
     DNFFittedModel,
     DNFModelConfig,

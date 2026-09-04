@@ -46,16 +46,16 @@ Feature engineering (Gold layer)
     ↓
 XGBRanker + DNF model (Training and Optimization)
     ↓
-Monte Carlo simulation (Compute probabilities)
+Monte Carlo simulation 
     ↓
-Validated JSON publication (GitHub Actions)
+Validated JSON publication 
     ↓
 FastAPI (Vercel) → Streamlit interface
 ```
 
 The hosted application is read-only: it serves precomputed, validated JSON artifacts rather than training models or fetching race data at request time.
 
-The training of the models and production of JSON files containing the data to display are done inside the GitHub repository via Actions.
+The training of the models and production of JSON files containing the data to display are done inside the GitHub repository, scheduled before and after the race sessions.
 
 ## Model Evaluation
 The ranker is evaluated on future Grands Prix using expanding temporal folds. Its primary metric is mean race-level pairwise accuracy across the full classified grid. Teammate pairwise accuracy, mean absolute position error, NDCG, and top-k overlap are reported as additional diagnostics.
