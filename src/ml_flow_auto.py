@@ -1,3 +1,7 @@
+import sys, io
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
 import socket
 import subprocess
 import time
@@ -79,7 +83,7 @@ def launch_mlflow_server(host=MLFLOW_HOST, port=MLFLOW_PORT):
     for i in range(max_retries):
         time.sleep(1.0)
         if is_port_in_use(host, port):
-            print(f"[✔] [Telemetry] Server avviato con successo! (PID: {process.pid})")
+            print(f"[OK] [Telemetry] Server avviato con successo! (PID: {process.pid})")
             return process
         print(f"    - In attesa che il server risponda... ({i+1}/{max_retries})")
 

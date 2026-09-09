@@ -37,13 +37,14 @@ $settings = New-ScheduledTaskSettingsSet `
     -WakeToRun `
     -StartWhenAvailable `
     -DontStopOnIdleEnd `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
     -RestartCount 1 -RestartInterval (New-TimeSpan -Minutes 10)
 
 # Esegue con i TUOI privilegi utente (necessari per git push con le tue
 # credenziali), sia che tu sia loggato o meno (-LogonType S4U).
-# In register_pitwall_tasks.ps1, sostituisci la riga del principal con:
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Limited
 
 Register-ScheduledTask -TaskName "PitWall-Oracle-Predictions" `
     -Action $predAction -Trigger $predTriggers -Settings $settings -Principal $principal `

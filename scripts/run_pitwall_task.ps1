@@ -130,7 +130,7 @@ try {
     # Sostituisce lo step "Commit and push" dei workflow: qui gira con le
     # TUE credenziali git locali (assumo tu abbia gia' push access configurato,
     # via credential manager o SSH key - nessun token da gestire).
-    git add -A -- results webapp\api\data models
+    git add -A -- results webapp\api\data models data_files
     git diff --cached --quiet; $hasChanges = ($LASTEXITCODE -ne 0)
     if ($hasChanges) {
         git commit -m "chore(publication): $Task via local scheduler ($timestamp)"
