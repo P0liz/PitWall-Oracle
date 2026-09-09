@@ -1,0 +1,29 @@
+{
+  "source": "fia_provisional",
+  "source_url": "https://www.fia.com/system/files/decision-document/2026_italian_grand_prix_-_provisional_starting_grid.pdf",
+  "fetched_at": "2026-09-06T12:00:22.550707+00:00",
+  "grid": {
+    "gas_pierre_gasly": 1.0,
+    "rus_george_russell": 2.0,
+    "lec_charles_leclerc": 3.0,
+    "ham_lewis_hamilton": 4.0,
+    "ver_max_verstappen": 5.0,
+    "pia_oscar_piastri": 6.0,
+    "col_franco_colapinto": 7.0,
+    "nor_lando_norris": 8.0,
+    "lin_arvid_lindblad": 9.0,
+    "bor_gabriel_bortoleto": 10.0,
+    "bea_oliver_bearman": 11.0,
+    "hul_nico_hulkenberg": 12.0,
+    "sai_carlos_sainz": 13.0,
+    "oco_esteban_ocon": 14.0,
+    "tsu_yuki_tsunoda": 15.0,
+    "bot_valtteri_bottas": 16.0,
+    "per_sergio_perez": 17.0,
+    "alo_fernando_alonso": 18.0,
+    "str_lance_stroll": 19.0,
+    "ant_kimi_antonelli": 20.0,
+    "law_liam_lawson": 21.0,
+    "alb_alexander_albon": 22.0
+  }
+}
