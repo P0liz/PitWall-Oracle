@@ -1,0 +1,29 @@
+{
+  "source": "fia_provisional",
+  "source_url": "https://www.fia.com/system/files/decision-document/2026_spanish_grand_prix_-_provisional_starting_grid.pdf",
+  "fetched_at": "2026-09-13T06:37:43.822575+00:00",
+  "grid": {
+    "nor_lando_norris": 1.0,
+    "ant_kimi_antonelli": 2.0,
+    "ver_max_verstappen": 3.0,
+    "ham_lewis_hamilton": 4.0,
+    "lec_charles_leclerc": 5.0,
+    "rus_george_russell": 6.0,
+    "pia_oscar_piastri": 7.0,
+    "law_liam_lawson": 8.0,
+    "col_franco_colapinto": 9.0,
+    "lin_arvid_lindblad": 10.0,
+    "hul_nico_hulkenberg": 11.0,
+    "bor_gabriel_bortoleto": 12.0,
+    "oco_esteban_ocon": 13.0,
+    "gas_pierre_gasly": 14.0,
+    "tsu_yuki_tsunoda": 15.0,
+    "alb_alexander_albon": 16.0,
+    "alo_fernando_alonso": 17.0,
+    "per_sergio_perez": 18.0,
+    "bot_valtteri_bottas": 19.0,
+    "sai_carlos_sainz": 20.0,
+    "bea_oliver_bearman": 21.0,
+    "str_lance_stroll": 22.0
+  }
+}
