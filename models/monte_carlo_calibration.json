@@ -57,6 +57,10 @@
       {
         "selected_after_round": 13,
         "sigma_relative": 0.5262742667379364
+      },
+      {
+        "selected_after_round": 14,
+        "sigma_relative": 0.51571030365841
       }
     ]
   }

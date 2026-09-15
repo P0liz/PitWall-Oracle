@@ -126,6 +126,13 @@
       "session_type": "race",
       "name": "Italian Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 14,
+      "session_type": "race",
+      "name": "Spanish Grand Prix",
+      "publication_type": "live"
     }
   ],
   "global_statistics": null
