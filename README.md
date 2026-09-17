@@ -6,6 +6,7 @@ PitWall Oracle combines a learning-to-rank model, a separate DNF-probability mod
 
 ## [Live Demo](https://pitwall-oracle.streamlit.app/)
 [![PitWall Oracle web app preview](webapp/ui/assets/app-preview.jpeg)](https://pitwall-oracle.streamlit.app/)
+Inside the History section of the app there are some metrics: Winner accuracy, Podium hit rate, Pairwise Accuracy and MAE, calculated using the average on the past races. The results are promising, but obviously there will always be some degree of uncertainty, due to F1 volatility.
 
 ## Project Motivation
 Formula 1 predictions are often presented as simple driver rankings, even though a race outcome depends on connected uncertainties: driver form, race pace, circuit characteristics, starting position, reliability, and retirements.
