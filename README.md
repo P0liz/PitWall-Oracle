@@ -6,6 +6,8 @@ PitWall Oracle combines a learning-to-rank model, a separate DNF-probability mod
 
 ## [Live Demo](https://pitwall-oracle.streamlit.app/)
 [![PitWall Oracle web app preview](webapp/ui/assets/app-preview.jpeg)](https://pitwall-oracle.streamlit.app/)
+The app might be in sleep due to Streamlit inactivity policy, so just press the button in the middle (after going to the link) to wake it up.
+
 Inside the History section of the app there are some metrics: Winner accuracy, Podium hit rate, Pairwise Accuracy and MAE, calculated using the average on the past races. The results are promising, but obviously there will always be some degree of uncertainty, due to F1 volatility.
 
 ## Project Motivation
