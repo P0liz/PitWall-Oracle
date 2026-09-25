@@ -26,16 +26,53 @@ def make_weights(race_dates: pd.Series, decay_rate: float, reference_date: pd.Ti
     return np.exp(-decay_rate * days_elapsed)
 
 
+def extract_model_categories(booster) -> dict[str, list[str]]:
+    import json
+
+    model_json = json.loads(booster.save_raw("json"))
+    try:
+        cats_enc = model_json["learner"]["gradient_booster"]["model"]["cats"]["enc"]
+    except KeyError:
+        return {}
+
+    feature_names = booster.feature_names
+    categories_map = {}
+    for i, feature in enumerate(feature_names):
+        if i < len(cats_enc):
+            enc = cats_enc[i]
+            if "offsets" in enc and "values" in enc and enc["offsets"]:
+                offsets = enc["offsets"] + [len(enc["values"])]
+                values = enc["values"]
+                decoded_cats = []
+                for j in range(len(offsets) - 1):
+                    byte_list = [x if x >= 0 else x + 256 for x in values[offsets[j] : offsets[j + 1]]]
+                    cat_str = bytes(byte_list).decode("utf-8", errors="replace")
+                    if cat_str:
+                        decoded_cats.append(cat_str)
+                categories_map[feature] = decoded_cats
+    return categories_map
+
+
 def select_model_feature_frame(model: XGBRanker, frame: pd.DataFrame) -> pd.DataFrame:
     """Align inference columns and order to the feature names stored by XGBoost."""
 
-    feature_names = model.get_booster().feature_names
+    booster = model.get_booster()
+    feature_names = booster.feature_names
     if not feature_names:
         raise ValueError("Il modello non espone i nomi delle feature")
     missing = [feature for feature in feature_names if feature not in frame.columns]
     if missing:
         raise ValueError(f"Feature richieste dal modello ma assenti dal dataframe: {missing}")
-    return frame.loc[:, feature_names]
+
+    aligned_frame = frame.loc[:, feature_names].copy()
+    if hasattr(booster, "feature_types") and booster.feature_types:
+        categories_map = extract_model_categories(booster)
+        for feature, f_type in zip(feature_names, booster.feature_types):
+            if f_type == "c" and feature in categories_map:
+                expected_cats = categories_map[feature]
+                aligned_frame[feature] = pd.Categorical(aligned_frame[feature], categories=expected_cats)
+
+    return aligned_frame
 
 
 class Training:
