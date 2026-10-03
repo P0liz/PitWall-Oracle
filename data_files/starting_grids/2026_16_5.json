@@ -1,0 +1,29 @@
+{
+  "source": "fia_provisional",
+  "source_url": "https://www.fia.com/system/files/decision-document/2026_bahrain_grand_prix_in_malaysia_-_provisional_starting_grid.pdf",
+  "fetched_at": "2026-10-03T17:22:33.678510+00:00",
+  "grid": {
+    "ver_max_verstappen": 1.0,
+    "ham_lewis_hamilton": 2.0,
+    "ant_kimi_antonelli": 3.0,
+    "lec_charles_leclerc": 4.0,
+    "nor_lando_norris": 5.0,
+    "pia_oscar_piastri": 6.0,
+    "rus_george_russell": 7.0,
+    "had_isack_hadjar": 8.0,
+    "gas_pierre_gasly": 9.0,
+    "bor_gabriel_bortoleto": 10.0,
+    "law_liam_lawson": 11.0,
+    "alo_fernando_alonso": 12.0,
+    "sai_carlos_sainz": 13.0,
+    "str_lance_stroll": 14.0,
+    "hul_nico_hulkenberg": 15.0,
+    "bea_oliver_bearman": 16.0,
+    "oco_esteban_ocon": 17.0,
+    "alb_alexander_albon": 18.0,
+    "bot_valtteri_bottas": 19.0,
+    "per_sergio_perez": 20.0,
+    "col_franco_colapinto": 21.0,
+    "lin_arvid_lindblad": 22.0
+  }
+}
