@@ -140,6 +140,13 @@
       "session_type": "race",
       "name": "Azerbaijan Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 16,
+      "session_type": "race",
+      "name": "Bahrain Grand Prix",
+      "publication_type": "live"
     }
   ],
   "global_statistics": null
