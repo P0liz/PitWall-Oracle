@@ -154,6 +154,13 @@
       "session_type": "sprint",
       "name": "Singapore Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 17,
+      "session_type": "race",
+      "name": "Singapore Grand Prix",
+      "publication_type": "live"
     }
   ],
   "global_statistics": null
