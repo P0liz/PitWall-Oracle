@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import HuberRegressor
 from src.config import *
+from src.data.history_builder import map_team_id
 from src.utils import get_driver_fastest_quali_time, setup_custom_logger, is_race_dnf
 
 # TODO: aggiungere test per le features più complesse?
@@ -110,7 +111,11 @@ class FeatureEngineering:
         return float(score)
 
     def compute_team_race_pace(self, long_run_laps: pd.DataFrame, team: str):
-        team_laps = long_run_laps[long_run_laps["Team"] == team]
+        if long_run_laps.empty or "Team" not in long_run_laps.columns:
+            return np.nan
+
+        target_team_id = map_team_id(team)
+        team_laps = long_run_laps[long_run_laps["Team"].map(map_team_id) == target_team_id]
         if team_laps.empty:
             # self.log.warning(f"No laps found for team {team} in long run laps")
             return np.nan

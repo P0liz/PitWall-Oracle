@@ -209,3 +209,6 @@ IS_STREET_CIRCUIT = {
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 PREVIOUS_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+
+# OpenF1 API (fallback)
+OPENF1_BASE_URL = "https://api.openf1.org/v1"

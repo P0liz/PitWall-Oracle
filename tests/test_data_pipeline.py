@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pandas as pd
 
+from src.data.bronze_layer import BronzeLayer
 from src.data.data_loader import DataLoader
 from src.dnf.dnf_features import DNF_CANDIDATE_FEATURES
 
@@ -88,6 +89,37 @@ class DataPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertAlmostEqual(encoding["driver_a"], 2 / 3)
         self.assertAlmostEqual(encoding["driver_b"], 1 / 3)
+
+
+    def test_bronze_layer_falls_back_to_openf1_without_retry_delay(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bronze = BronzeLayer()
+            bronze.data_dir = Path(temp_dir)
+
+            fake_laps = pd.DataFrame(
+                {
+                    "Driver": ["LEC", "VER"],
+                    "LapNumber": [1.0, 1.0],
+                    "LapTime": [pd.Timedelta(seconds=95), pd.Timedelta(seconds=96)],
+                    "Compound": ["SOFT", "MEDIUM"],
+                    "Deleted": [False, False],
+                    "IsAccurate": [True, True],
+                }
+            )
+
+            mock_session = Mock()
+            mock_session.load.side_effect = Exception("F1 LiveTiming 401 Unauthorized")
+            mock_session.laps = None
+
+            with patch("src.data.bronze_layer.fastf1.get_session", return_value=mock_session), patch.object(
+                bronze, "_get_openf1_raw_laps", return_value=fake_laps
+            ) as mock_openf1:
+                result = bronze.get_raw_laps(2026, 18, 2)
+
+                self.assertEqual(len(result), 2)
+                mock_session.load.assert_called_once()
+                mock_openf1.assert_called_once_with(2026, 18, 2)
+                self.assertTrue((bronze.data_dir / "2026_18_2_raw_laps.parquet").exists())
 
 
 if __name__ == "__main__":

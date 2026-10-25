@@ -195,7 +195,8 @@ def main(
                     simulations=args.simulations,
                     seed=args.seed,
                     force_refresh=args.force_refresh or (automatic and operation.operation == "publish-prediction"),
-                    allow_prediction_replace=automatic and operation.operation == "publish-prediction",
+                    allow_prediction_replace=args.force_refresh
+                    or (automatic and operation.operation == "publish-prediction"),
                 )
             )
         except ResultsNotReadyError as error:
