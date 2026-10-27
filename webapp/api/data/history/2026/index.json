@@ -161,6 +161,13 @@
       "session_type": "race",
       "name": "Singapore Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 18,
+      "session_type": "race",
+      "name": "United States Grand Prix",
+      "publication_type": "live"
     }
   ],
   "global_statistics": null
