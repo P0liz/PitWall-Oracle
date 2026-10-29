@@ -20,6 +20,18 @@ $ScriptPath = "C:\Users\ASUS\Github\PitWall-Oracle\scripts\run_pitwall_task.ps1"
 $WorkingDir = "C:\Users\ASUS\Github\PitWall-Oracle"
 
 # --------------------------------------------------------------------------
+# Configurazione energetica: abilita Wake Timers per consentire il risveglio
+# dall'ibernazione (S4) sia a corrente (AC) sia a batteria (DC).
+# In Windows di default è spesso "2 = Solo importanti", che blocca i task utente.
+# Impostando a "1 = Abilita", Windows sveglierà il sistema per i task schedulati.
+# --------------------------------------------------------------------------
+Write-Host "Configurazione Wake Timers nel piano energetico attivo..."
+# SUB_SLEEP = 238c9fa8-0aad-41ed-83f4-97be242c8f20 | RTCWAKE = bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d
+powercfg /SETACVALUEINDEX SCHEME_CURRENT 238c9fa8-0aad-41ed-83f4-97be242c8f20 bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d 1
+powercfg /SETDCVALUEINDEX SCHEME_CURRENT 238c9fa8-0aad-41ed-83f4-97be242c8f20 bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d 1
+powercfg /SETACTIVE SCHEME_CURRENT
+
+# --------------------------------------------------------------------------
 # Task 1: Predictions -> ogni 6h
 # --------------------------------------------------------------------------
 $predAction = New-ScheduledTaskAction -Execute "powershell.exe" `
@@ -39,12 +51,15 @@ $settings = New-ScheduledTaskSettingsSet `
     -DontStopOnIdleEnd `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
+    -Priority 4 `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
-    -RestartCount 1 -RestartInterval (New-TimeSpan -Minutes 10)
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
 
 # Esegue con i TUOI privilegi utente (necessari per git push con le tue
-# credenziali), sia che tu sia loggato o meno (-LogonType S4U).
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Limited
+# credenziali), sia che tu sia loggato o meno (-LogonType S4U), con
+# RunLevel Highest per consentire a run_pitwall_task.ps1 di rientrare
+# in ibernazione (SeShutdownPrivilege) dopo l'esecuzione unattended.
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest
 
 Register-ScheduledTask -TaskName "PitWall-Oracle-Predictions" `
     -Action $predAction -Trigger $predTriggers -Settings $settings -Principal $principal `

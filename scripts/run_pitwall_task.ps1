@@ -36,7 +36,21 @@ $logFile   = Join-Path $LogDir "$Task`_$timestamp.log"
 # Lock CONDIVISO tra i due task: replica `concurrency: group: pitwall-publication`
 # di GitHub Actions, dove prediction e post-race non giravano mai insieme perché
 # entrambi i workflow usavano lo stesso nome di gruppo.
-$lockFile  = Join-Path $LockDir "pitwall-publication.lock"
+$lockFile    = Join-Path $LockDir "pitwall-publication.lock"
+$waitingLock = Join-Path $LockDir "waiting_$Task.lock"
+
+# Inizializzazione Win32 Power Management
+Add-Type -Namespace Win32 -Name Power -MemberDefinition @'
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    public static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
+'@ -ErrorAction SilentlyContinue
+
+$ES_CONTINUOUS        = [uint32]::Parse("2147483648") # 0x80000000
+$ES_SYSTEM_REQUIRED   = [uint32]1                     # 0x00000001
+$ES_AWAYMODE_REQUIRED = [uint32]64                    # 0x00000040
 
 function Write-Log {
     param([string]$Message)
@@ -64,25 +78,131 @@ function Send-FailureNotification {
     }
 }
 
-# --------------------------- Mutua esclusione ---------------------------
-# Se l'altro job (prediction/postrace) e' ancora in corso, esci senza errore:
-# verra' ritentato al prossimo poll schedulato, e questo NON e' un fallimento
-# vero (choose_due_operations() ricontrollera' cosa e' ancora "due").
-if (Test-Path $lockFile) {
-    $lockAgeMinutes = (New-TimeSpan -Start (Get-Item $lockFile).LastWriteTime -End (Get-Date)).TotalMinutes
-    if ($lockAgeMinutes -lt 90) {
-        Write-Log "Lock attivo (eta $([math]::Round($lockAgeMinutes,1)) min), un altro job e' in corso: esco senza eseguire."
-        exit 0
-    } else {
-        Write-Log "Lock trovato ma stantio (>90 min): probabile crash precedente, lo rimuovo e procedo."
-        Remove-Item $lockFile -Force
+function Test-WokeByTimer {
+    try {
+        $recentWake = Get-WinEvent -FilterHashtable @{
+            LogName      = 'System'
+            ProviderName = 'Microsoft-Windows-Power-Troubleshooter'
+            Id           = 1
+        } -MaxEvents 1 -ErrorAction Stop
+
+        if ($recentWake) {
+            $ageMinutes = ((Get-Date) - $recentWake.TimeCreated).TotalMinutes
+            if ($ageMinutes -lt 45) {
+                if ($recentWake.Properties.Count -ge 3 -and $recentWake.Properties[2].Value -eq 4) {
+                    return $true
+                }
+                $msg = $recentWake.Message
+                if ($msg -match "Wake Source:.*(Timer|NT TASK|Task Scheduler)") {
+                    return $true
+                }
+            }
+        }
+    } catch {
+        # Nel dubbio non assume wake da timer
     }
+    return $false
 }
-New-Item -ItemType File -Path $lockFile -Force | Out-Null
+
+function Test-UserActive {
+    # 1. Se LogonUI.exe non sta girando e c'è explorer attivo, la sessione console è sbloccata
+    $logonUI = Get-Process LogonUI -ErrorAction SilentlyContinue
+    if (-not $logonUI) {
+        $explorer = Get-Process explorer -ErrorAction SilentlyContinue
+        if ($explorer) {
+            return $true
+        }
+    }
+
+    # 2. Controllo rapido via quser
+    try {
+        $quser = quser 2>$null
+        foreach ($line in ($quser -split "`r?`n")) {
+            if ($line -match "console\s+Active\s+(\.|\d+:\d+|\d+)") {
+                if ($matches[1] -eq ".") {
+                    return $true
+                }
+            }
+        }
+    } catch {}
+
+    return $false
+}
+
+function Wait-ForNetwork {
+    param([int]$TimeoutSeconds = 90)
+    Write-Log "Verifico connettivita' di rete..."
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $attempts = 0
+    while ((Get-Date) -lt $deadline) {
+        $attempts++
+        $tcpOk = $false
+        try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $asyncResult = $tcp.BeginConnect("github.com", 443, $null, $null)
+            $waitHandle = $asyncResult.AsyncWaitHandle.WaitOne(3000, $false)
+            if ($waitHandle -and $tcp.Connected) {
+                $tcp.EndConnect($asyncResult)
+                $tcpOk = $true
+            }
+            $tcp.Close()
+        } catch {
+            $tcpOk = $false
+        }
+
+        if ($tcpOk) {
+            Write-Log "Connettivita' di rete verificata con successo (tentativo $attempts)."
+            return $true
+        }
+
+        $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
+        Write-Log "In attesa che la rete si riconnetta (tentativo $attempts, timeout tra ${remaining}s)..."
+        Start-Sleep -Seconds 5
+    }
+    Write-Log "ATTENZIONE: Timeout di rete raggiunto ($TimeoutSeconds s). Procedo comunque."
+    return $false
+}
+
+$wokeByTimer = Test-WokeByTimer
+$lockAcquired = $false
+
+# Segnala presenza in coda per evitare che l'altro task iberni mentre questo attende
+New-Item -ItemType File -Path $waitingLock -Force | Out-Null
 
 try {
+    # Impedisce a Windows di rientrare in sospensione/ibernazione (timeout 2 min unattended)
+    # mentre il task è in attesa del lock o in esecuzione.
+    try {
+        [Win32.Power]::SetThreadExecutionState($ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED -bor $ES_AWAYMODE_REQUIRED) | Out-Null
+    } catch {}
+
+    # --------------------------- Mutua esclusione e coda ---------------------------
+    $waitDeadline = (Get-Date).AddMinutes(45)
+    while (Test-Path $lockFile) {
+        $lockAgeMinutes = (New-TimeSpan -Start (Get-Item $lockFile).LastWriteTime -End (Get-Date)).TotalMinutes
+        if ($lockAgeMinutes -gt 90) {
+            Write-Log "Lock trovato ma stantio (>90 min): probabile crash precedente, lo rimuovo e procedo."
+            Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+            break
+        }
+        if ((Get-Date) -ge $waitDeadline) {
+            Write-Log "Tempo massimo di attesa lock (45 min) superato. Esco senza eseguire."
+            exit 0
+        }
+        Write-Log "Lock attivo da un altro task. In attesa di rilascio (controllo tra 15s)..."
+        Start-Sleep -Seconds 15
+    }
+
+    New-Item -ItemType File -Path $lockFile -Force | Out-Null
+    $lockAcquired = $true
+    Remove-Item $waitingLock -Force -ErrorAction SilentlyContinue
+
     Set-Location $RepoRoot
     Write-Log "=== Avvio task '$Task' ==="
+    Write-Log "Rilevato avvio da Wake Timer: $wokeByTimer"
+
+    # Attesa riconnessione Wi-Fi dopo il risveglio da S4
+    Wait-ForNetwork -TimeoutSeconds 90
 
     $summaryPath = Join-Path $RepoRoot "results\publication-summary.json"
 
@@ -146,7 +266,43 @@ catch {
     exit 1
 }
 finally {
-    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+    if ($lockAcquired) {
+        Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item $waitingLock -Force -ErrorAction SilentlyContinue
+
+    # Rilascia la richiesta energetica
+    try {
+        [Win32.Power]::SetThreadExecutionState($ES_CONTINUOUS) | Out-Null
+    } catch {}
+
+    # ------------------ Rientro in Hibernation (Opzione A) ------------------
+    if ($lockAcquired) {
+        $otherWaiting = Get-ChildItem -Path $LockDir -Filter "waiting_*.lock" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne "waiting_$Task.lock" }
+        if ($otherWaiting -and $otherWaiting.Count -gt 0) {
+            Write-Log "Altro task PitWall in coda ($($otherWaiting.Name -join ', ')): non iberno per consentirne l'esecuzione."
+        }
+        else {
+            $isUserActive = Test-UserActive
+            if ($wokeByTimer -and (-not $isUserActive)) {
+                Write-Log "Condizioni soddisfatte per rientro in ibernazione (wake via timer, nessun utente attivo sulla console)."
+                Write-Log "Rientro in ibernazione (S4) tra 5 secondi..."
+                Start-Sleep -Seconds 5
+                try {
+                    Start-Process -FilePath "shutdown.exe" -ArgumentList "/h" -NoNewWindow
+                } catch {
+                    [Win32.Power]::SetSuspendState($true, $false, $false)
+                }
+            } else {
+                if ($isUserActive) {
+                    Write-Log "Utente attivo rilevato sulla console: il PC resta acceso normalmente."
+                } else {
+                    Write-Log "Avvio non da Wake Timer (es. interattivo/manuale): il PC resta acceso."
+                }
+            }
+        }
+    }
 }
 
 <#
