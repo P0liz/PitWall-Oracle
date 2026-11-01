@@ -1,0 +1,29 @@
+{
+  "source": "fia_provisional",
+  "source_url": "https://www.fia.com/system/files/decision-document/2026_mexico_city_grand_prix_-_provisional_starting_grid.pdf",
+  "fetched_at": "2026-11-01T12:21:57.509800+00:00",
+  "grid": {
+    "ham_lewis_hamilton": 1.0,
+    "rus_george_russell": 2.0,
+    "lec_charles_leclerc": 3.0,
+    "ant_kimi_antonelli": 4.0,
+    "ver_max_verstappen": 5.0,
+    "nor_lando_norris": 6.0,
+    "had_isack_hadjar": 7.0,
+    "lin_arvid_lindblad": 8.0,
+    "gas_pierre_gasly": 9.0,
+    "hul_nico_h\u00fclkenberg": 10.0,
+    "col_franco_colapinto": 11.0,
+    "pia_oscar_piastri": 12.0,
+    "bor_gabriel_bortoleto": 13.0,
+    "bea_oliver_bearman": 14.0,
+    "sai_carlos_sainz": 15.0,
+    "alb_alexander_albon": 16.0,
+    "alo_fernando_alonso": 17.0,
+    "nan_ryo_hirakawa": 18.0,
+    "str_lance_stroll": 19.0,
+    "per_sergio_p\u00e9rez": 20.0,
+    "bot_valtteri_bottas": 21.0,
+    "law_liam_lawson": 22.0
+  }
+}
