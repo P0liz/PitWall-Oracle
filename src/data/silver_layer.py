@@ -2,7 +2,7 @@ import math
 import os
 import pandas as pd
 from pathlib import Path
-from src.config import DATA_DIR
+from src.config import DATA_DIR, DRIVER_NUMBER_TO_ABBREVIATION_2026, NEW_YEAR
 from .bronze_layer import BronzeLayer
 from .history_builder import build_driver_id, map_team_id
 from src.utils import setup_custom_logger
@@ -20,6 +20,20 @@ class SilverLayer:
         self.bronze = BronzeLayer()
         self.log = setup_custom_logger("DataLoader")
 
+    def _resolve_driver_abbreviation(self, driver_number, year: int = NEW_YEAR) -> str:
+        """Resolve driver abbreviation via DriverNumber mapping if missing or invalid."""
+        if year == 2026 and pd.notna(driver_number):
+            try:
+                num = int(driver_number)
+                if num in DRIVER_NUMBER_TO_ABBREVIATION_2026:
+                    return DRIVER_NUMBER_TO_ABBREVIATION_2026[num]
+            except (ValueError, TypeError):
+                self.log.error(f"Invalid driver number: {driver_number} - mapping incomplete for year {year}")
+                raise ValueError(f"Invalid driver number: {driver_number} - mapping incomplete for year {year}")
+        else:
+            self.log.error(f"Driver abbreviation missing and no mapping available for year {year}")
+            raise ValueError(f"Driver abbreviation missing and no mapping available for year {year}")
+
     def get_clean_laps(self, year: int, race_number: int, session: int, force: bool):
         """
         Returns a cleaned version of the laps data for a given year, race number and session.
@@ -27,7 +41,7 @@ class SilverLayer:
         The cleaning process involves removing laps that are deleted, inaccurate,
         or have lap times that deviate significantly from the driver's previous lap time.
 
-        Required columns in the raw data: 'LapTime', 'Deleted', 'IsAccurate', 'Driver' (Abbreviation).
+        Required columns in the raw data: 'LapTime', 'Deleted', 'IsAccurate', 'DriverNumber'.
         """
         assert (session >= 1) & (session <= 5), "Session number not valid: 1 <= session <= 5"
 
@@ -41,9 +55,19 @@ class SilverLayer:
             if df["LapTime"].empty:
                 self.log.error("LapTime column is empty")
                 raise ValueError("LapTime column is empty")
+            if df["DriverNumber"].isna().any():
+                self.log.error("DriverNumber column has missing values")
+                raise ValueError("DriverNumber column has missing values")
+            if df["Driver"].isna().any() or (df["Driver"] == "").any():
+                self.log.warning(
+                    f"Missing values in Driver column, resolving via DriverNumber mapping - {year}_{race_number}_{session}"
+                )
+                df["Driver"] = df.apply(
+                    lambda r: self._resolve_driver_abbreviation(r.get("DriverNumber"), year), axis=1
+                )
 
-            time_reference = 0
-            driver_ref = ""
+            time_reference = None
+            driver_ref = None
             to_drop = []
             # print("Tot: ", df.shape[0])
             for i in range(0, df.shape[0]):
@@ -58,9 +82,9 @@ class SilverLayer:
                     to_drop.append(i)
                     continue
                 # Get reference for new driver
-                if df.iloc[i]["Driver"] != driver_ref:
+                if time_reference is None or df.iloc[i]["DriverNumber"] != driver_ref:
                     time_reference = df.iloc[i]["LapTime"]
-                    driver_ref = df.iloc[i]["Driver"]
+                    driver_ref = df.iloc[i]["DriverNumber"]
                     continue
 
                 # Keep only laps that are within 4% of the driver's last lap time
@@ -77,7 +101,11 @@ class SilverLayer:
                         new_ref_third = df.iloc[i + 2]["LapTime"]
                         # If the next 3 laps are all within 4% of each other, we assume they are valid
                         if (
-                            new_ref_second < new_ref_first * TIME_THRESHOLD
+                            df.iloc[i + 1]["DriverNumber"] == driver_ref  # Same driver
+                            and df.iloc[i + 2]["DriverNumber"] == driver_ref
+                            and pd.notna(new_ref_second)  # Not NaN
+                            and pd.notna(new_ref_third)
+                            and new_ref_second < new_ref_first * TIME_THRESHOLD
                             and new_ref_third < new_ref_second * TIME_THRESHOLD
                         ):
                             time_reference = new_ref_first
@@ -98,7 +126,7 @@ class SilverLayer:
         """
         Returns a cleaned version of the results data for a given year, race number and session.
 
-        Required columns in the raw data: 'Position', 'Abbreviation', 'Status', 'Laps'.
+        Required columns in the raw data: 'Position', 'DriverNumber', 'Status', 'Laps'.
         """
         assert (session >= 1) & (session <= 5), "Session number not valid: 1 <= session <= 5"
 
@@ -109,15 +137,12 @@ class SilverLayer:
         else:
             # Load raw data
             df = self.bronze.get_raw_results(year, race_number, session)
-            if df["Position"].empty:
-                # TODO: possibly handle if too much data is corrupted
-                self.log.error("Position column is empty")
-                raise ValueError("Position column is empty")
-
-            if df["Abbreviation"].empty:
-                # TODO: possibly handle if too much data is corrupted
-                self.log.error("Abbreviation column is empty")
-                raise ValueError("Abbreviation column is empty")
+            if df["Position"].isna().any():
+                self.log.error("Position column has missing values")
+                raise ValueError("Position column has missing values")
+            if df["DriverNumber"].isna().any():
+                self.log.error("DriverNumber column has missing values")
+                raise ValueError("DriverNumber column has missing values")
 
             # TODO: handle if necessary
             # corrections for 2023 or before not supported (hard to distinguish sprint weekend from normal)
@@ -148,9 +173,18 @@ class SilverLayer:
                             df.at[idx, "Laps"] = max_laps // 2
 
             # Custom correction cause data sucks
-            if (df.loc[df["Abbreviation"] == "ANT", "FirstName"] == "Andrea Kimi").any():
+            if (df["FirstName"] == "Andrea Kimi").any():
                 self.log.warning(f"Found Andrea Kimi in ANT row, changing to Kimi - {year}_{race_number}_{session}")
-                df.loc[df["Abbreviation"] == "ANT", "FirstName"] = "Kimi"
+                df.loc[df["FirstName"] == "Andrea Kimi", "FirstName"] = "Kimi"
+
+            # Resolve missing Abbreviation via DriverNumber mapping if necessary
+            if df["Abbreviation"].isna().any() or (df["Abbreviation"] == "").any():
+                self.log.warning(
+                    f"Missing or invalid values in Abbreviation column, resolving via DriverNumber mapping - {year}_{race_number}_{session}"
+                )
+                df["Abbreviation"] = df.apply(
+                    lambda r: self._resolve_driver_abbreviation(r.get("DriverNumber"), year), axis=1
+                )
 
             # Add driver_id and team_id columns
             df["driver_id"] = df.apply(

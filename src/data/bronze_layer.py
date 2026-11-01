@@ -12,6 +12,7 @@ from fastf1.exceptions import DataNotLoadedError
 log = setup_custom_logger("DataLoader")
 
 
+# In case we need to retry loading data from FastF1 (currently useless)
 def _load_data_with_retry(
     session, required_attr: str, max_attempts: int = 1, base_delay_seconds: float = 0.0, **load_kwargs
 ):
@@ -206,30 +207,33 @@ class BronzeLayer:
         is_out_lap = laps_df.get("is_pit_out_lap", pd.Series([False] * len(laps_df))).fillna(False).astype(bool)
         is_accurate = laps_df["lap_duration"].notna() & (~is_out_lap)
 
-        raw_df = pd.DataFrame({
-            "Time": pd.to_datetime(laps_df["date_start"], format="ISO8601", utc=True),
-            "Driver": laps_df["driver_number"].astype(int).map(drv_map).fillna(""),
-            "DriverNumber": laps_df["driver_number"].astype(str),
-            "LapTime": pd.to_timedelta(laps_df["lap_duration"], unit="s"),
-            "LapNumber": laps_df["lap_number"].astype(float),
-            "Stint": stint_numbers,
-            "PitOutTime": [pd.Timedelta(seconds=0) if x else pd.NaT for x in is_out_lap],
-            "PitInTime": pd.NaT,
-            "Sector1Time": pd.to_timedelta(laps_df.get("duration_sector_1"), unit="s"),
-            "Sector2Time": pd.to_timedelta(laps_df.get("duration_sector_2"), unit="s"),
-            "Sector3Time": pd.to_timedelta(laps_df.get("duration_sector_3"), unit="s"),
-            "SpeedI1": laps_df.get("i1_speed"),
-            "SpeedI2": laps_df.get("i2_speed"),
-            "SpeedST": laps_df.get("st_speed"),
-            "IsPersonalBest": False,
-            "Compound": compounds,
-            "TyreLife": tyre_lifes,
-            "FreshTyre": True,
-            "Team": laps_df["driver_number"].astype(int).map(team_map).fillna(""),
-            "Position": positions,
-            "Deleted": deleted_laps,
-            "IsAccurate": is_accurate,
-        })
+        # Reconstruct a DataFrame similar to FastF1's laps DataFrame
+        raw_df = pd.DataFrame(
+            {
+                "Time": pd.to_datetime(laps_df["date_start"], format="ISO8601", utc=True),
+                "Driver": laps_df["driver_number"].astype(int).map(drv_map).fillna(""),
+                "DriverNumber": laps_df["driver_number"].astype(int),
+                "LapTime": pd.to_timedelta(laps_df["lap_duration"], unit="s"),
+                "LapNumber": laps_df["lap_number"].astype(float),
+                "Stint": stint_numbers,
+                "PitOutTime": [pd.Timedelta(seconds=0) if x else pd.NaT for x in is_out_lap],
+                "PitInTime": pd.NaT,
+                "Sector1Time": pd.to_timedelta(laps_df.get("duration_sector_1"), unit="s"),
+                "Sector2Time": pd.to_timedelta(laps_df.get("duration_sector_2"), unit="s"),
+                "Sector3Time": pd.to_timedelta(laps_df.get("duration_sector_3"), unit="s"),
+                "SpeedI1": laps_df.get("i1_speed"),
+                "SpeedI2": laps_df.get("i2_speed"),
+                "SpeedST": laps_df.get("st_speed"),
+                "IsPersonalBest": False,
+                "Compound": compounds,
+                "TyreLife": tyre_lifes,
+                "FreshTyre": True,
+                "Team": laps_df["driver_number"].astype(int).map(team_map).fillna(""),
+                "Position": positions,
+                "Deleted": deleted_laps,
+                "IsAccurate": is_accurate,
+            }
+        )
 
         raw_df = raw_df.sort_values(["Driver", "LapNumber"]).reset_index(drop=True)
         return raw_df
@@ -321,25 +325,28 @@ class BronzeLayer:
             team_name = drv.get("team_name", "")
             driver_id_slug = f"{first_name}_{last_name}".strip().lower().replace(" ", "_")
 
-            rows.append({
-                "DriverNumber": str(d_num),
-                "Abbreviation": abb,
-                "DriverId": driver_id_slug,
-                "TeamName": team_name,
-                "FirstName": first_name,
-                "LastName": last_name,
-                "FullName": full_name,
-                "Position": pos,
-                "ClassifiedPosition": str(int(pos)) if not np.isnan(pos) else "R",
-                "GridPosition": grid_pos,
-                "Q1": q1,
-                "Q2": q2,
-                "Q3": q3,
-                "Time": time_val,
-                "Status": status,
-                "Points": float(r.get("points", 0.0) or 0.0),
-                "Laps": float(r.get("number_of_laps", 0) or 0),
-            })
+            # Reconstruct a row similar to FastF1's results DataFrame
+            rows.append(
+                {
+                    "DriverNumber": d_num,
+                    "Abbreviation": abb,
+                    "DriverId": driver_id_slug,
+                    "TeamName": team_name,
+                    "FirstName": first_name,
+                    "LastName": last_name,
+                    "FullName": full_name,
+                    "Position": pos,
+                    "ClassifiedPosition": str(int(pos)) if not np.isnan(pos) else "R",
+                    "GridPosition": grid_pos,
+                    "Q1": q1,
+                    "Q2": q2,
+                    "Q3": q3,
+                    "Time": time_val,
+                    "Status": status,
+                    "Points": float(r.get("points", 0.0) or 0.0),
+                    "Laps": float(r.get("number_of_laps", 0) or 0),
+                }
+            )
 
         df = pd.DataFrame(rows)
         return df.sort_values("Position", na_position="last").reset_index(drop=True)
@@ -364,7 +371,9 @@ class BronzeLayer:
             df = self._get_openf1_raw_laps(year, race_number, session)
 
         if df is None or df.empty:
-            raise RuntimeError(f"Impossibile caricare 'laps' per {year}_{race_number}_{session} sia da FastF1 sia da OpenF1")
+            raise RuntimeError(
+                f"Impossibile caricare 'laps' per {year}_{race_number}_{session} sia da FastF1 sia da OpenF1"
+            )
 
         df.to_parquet(self.data_dir / filename)
         return df
@@ -389,7 +398,9 @@ class BronzeLayer:
             df = self._get_openf1_raw_results(year, race_number, session)
 
         if df is None or df.empty:
-            raise RuntimeError(f"Impossibile caricare 'results' per {year}_{race_number}_{session} sia da FastF1 sia da OpenF1")
+            raise RuntimeError(
+                f"Impossibile caricare 'results' per {year}_{race_number}_{session} sia da FastF1 sia da OpenF1"
+            )
 
         df.to_parquet(self.data_dir / filename)
         return df

@@ -200,7 +200,7 @@ class GoldLayer:
                 "race_number": race_number,
                 "year": year,
                 "session_type": "race" if session == 5 else "sprint",
-                "raw_driver_id": driver_id,
+                "raw_driver_id": driver_id,  # needed cause driver_id and team_id are changed as numeric values in the history
                 "raw_team_id": team_id,
                 "driver_id": driver_id,
                 "team_id": team_id,

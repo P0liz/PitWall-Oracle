@@ -113,6 +113,49 @@ TEAM_ID_MAPPING = {
     "": "unknown",
 }
 
+# 2026 DriverNumber -> Abbreviation mapping (titolari e terzi/FP1/riserve)
+DRIVER_NUMBER_TO_ABBREVIATION_2026 = {
+    1: "NOR",   # Lando Norris
+    3: "VER",   # Max Verstappen
+    5: "BOR",   # Gabriel Bortoleto
+    6: "HAD",   # Isack Hadjar
+    7: "DOO",   # Jack Doohan
+    10: "GAS",  # Pierre Gasly
+    11: "PER",  # Sergio Perez
+    12: "ANT",  # Kimi Antonelli
+    14: "ALO",  # Fernando Alonso
+    16: "LEC",  # Charles Leclerc
+    18: "STR",  # Lance Stroll
+    22: "TSU",  # Yuki Tsunoda
+    23: "ALB",  # Alexander Albon
+    24: "ZHO",  # Zhou Guanyu
+    25: "HER",  # Colton Herta
+    27: "HUL",  # Nico Hulkenberg
+    30: "LAW",  # Liam Lawson
+    31: "OCO",  # Esteban Ocon
+    34: "CRA",  # Jak Crawford
+    36: "IWA",  # Ayumu Iwasa
+    38: "BEG",  # Dino Beganovic
+    41: "LIN",  # Arvid Lindblad
+    43: "COL",  # Franco Colapinto
+    44: "HAM",  # Lewis Hamilton
+    46: "BRO",  # Luke Browning
+    50: "HIR",  # Ryo Hirakawa
+    55: "SAI",  # Carlos Sainz
+    61: "ARO",  # Paul Aron
+    62: "MIN",  # Gabriele Mini
+    63: "RUS",  # George Russell
+    67: "FOR",  # Leonardo Fornaroli
+    72: "VES",  # Frederik Vesti
+    77: "BOT",  # Valtteri Bottas
+    81: "PIA",  # Oscar Piastri
+    87: "BEA",  # Oliver Bearman
+    90: "IWA",  # Ayumu Iwasa
+    91: "TSO",  # Nikola Tsolov
+    97: "ARO",  # Paul Aron
+    98: "SLA",  # Freddie Slater
+}
+
 # "Location": (longitude, latitude)
 CIRCUIT_COORDS = {
     "Austin": (-97.633, 30.135),
