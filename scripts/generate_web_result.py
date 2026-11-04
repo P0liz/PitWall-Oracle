@@ -213,6 +213,8 @@ def main(
                     str(error),
                 )
             )
+    for s in summaries:
+        print(f'[{s.status}] {s.operation} {s.season} R{s.round_number} ({s.session_type}): {s.message}')
     _write_summary(args.summary_path, _batch_summary(summaries))
     return 0
 
