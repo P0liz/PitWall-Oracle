@@ -58,11 +58,16 @@ class SilverLayer:
             if df["DriverNumber"].isna().any():
                 self.log.error("DriverNumber column has missing values")
                 raise ValueError("DriverNumber column has missing values")
-            if df["Driver"].isna().any() or (df["Driver"] == "").any():
+            invalid_mask = (
+                df["Driver"].isna()
+                | (df["Driver"] == "")
+                | (df["Driver"].astype(str).str.strip().str.lower() == "nan")
+            )
+            if invalid_mask.any():
                 self.log.warning(
                     f"Missing values in Driver column, resolving via DriverNumber mapping - {year}_{race_number}_{session}"
                 )
-                df["Driver"] = df.apply(
+                df.loc[invalid_mask, "Driver"] = df.loc[invalid_mask].apply(
                     lambda r: self._resolve_driver_abbreviation(r.get("DriverNumber"), year), axis=1
                 )
 
@@ -178,11 +183,16 @@ class SilverLayer:
                 df.loc[df["FirstName"] == "Andrea Kimi", "FirstName"] = "Kimi"
 
             # Resolve missing Abbreviation via DriverNumber mapping if necessary
-            if df["Abbreviation"].isna().any() or (df["Abbreviation"] == "").any():
+            invalid_mask = (
+                df["Abbreviation"].isna()
+                | (df["Abbreviation"] == "")
+                | (df["Abbreviation"].astype(str).str.strip().str.lower() == "nan")
+            )
+            if invalid_mask.any():
                 self.log.warning(
                     f"Missing or invalid values in Abbreviation column, resolving via DriverNumber mapping - {year}_{race_number}_{session}"
                 )
-                df["Abbreviation"] = df.apply(
+                df.loc[invalid_mask, "Abbreviation"] = df.loc[invalid_mask].apply(
                     lambda r: self._resolve_driver_abbreviation(r.get("DriverNumber"), year), axis=1
                 )
 

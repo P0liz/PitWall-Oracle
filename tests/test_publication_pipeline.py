@@ -355,6 +355,14 @@ class PublicationPipelineTests(unittest.TestCase):
         self.assertFalse(published_current_gp(race_summary, 2026, False))
         with self.assertRaises(WorkflowPolicyError):
             validate_changed_paths(
+                "post-race",
+                ("data_files/bronze/2026_19_5_raw_results.parquet",),
+                race_summary,
+                2026,
+                False,
+            )
+        with self.assertRaises(WorkflowPolicyError):
+            validate_changed_paths(
                 "post-race", (*model_paths, "models/pitwall_oracle_pending.json"), race_summary, 2026, True
             )
 

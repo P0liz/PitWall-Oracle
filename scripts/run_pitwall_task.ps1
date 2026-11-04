@@ -205,6 +205,10 @@ try {
     Wait-ForNetwork -TimeoutSeconds 90
 
     $summaryPath = Join-Path $RepoRoot "results\publication-summary.json"
+    $commitPathsFile = Join-Path $RepoRoot "results\commit-paths.txt"
+    $currentYear = (Get-Date).ToUniversalTime().Year
+    $validateMode = if ($Task -eq "prediction") { "prediction" } else { "post-race" }
+    $trainingRan = "false"
 
     if ($Task -eq "prediction") {
         # Equivalente allo step "Publish automatically due predictions"
@@ -221,18 +225,28 @@ try {
         $exitCode = $LASTEXITCODE
 
         if ($exitCode -eq 0) {
-            $currentYear = (Get-Date).ToUniversalTime().Year
             $trainingRequired = & $VenvPython scripts\validate_workflow_changes.py training-required `
                 --summary-path $summaryPath `
                 --current-year $currentYear `
                 --enabled "true"
-            Write-Log "Training required: $trainingRequired"
+            $trainingRan = $trainingRequired.Trim()
+            Write-Log "Training required: $trainingRan"
 
-            if ($trainingRequired.Trim() -eq "true") {
+            if ($trainingRan -eq "true") {
                 & $VenvPython scripts\run_post_race_pipeline.py --year $currentYear 2>&1 | Tee-Object -Append -FilePath $logFile
                 $exitCode = $LASTEXITCODE
             }
         }
+    }
+
+    if ($exitCode -eq 0) {
+        & $VenvPython scripts\validate_workflow_changes.py validate `
+            --mode $validateMode `
+            --summary-path $summaryPath `
+            --year $currentYear `
+            --training-ran $trainingRan `
+            --output-path $commitPathsFile 2>&1 | Tee-Object -Append -FilePath $logFile
+        $exitCode = $LASTEXITCODE
     }
 
     if ($exitCode -ne 0) {
@@ -247,17 +261,27 @@ try {
     Write-Log "=== Task '$Task' completato (published/deferred/no-op) ==="
 
     # --------------------------- Commit & push ---------------------------
-    # Sostituisce lo step "Commit and push" dei workflow: qui gira con le
-    # TUE credenziali git locali (assumo tu abbia gia' push access configurato,
-    # via credential manager o SSH key - nessun token da gestire).
-    git add -A -- results webapp\api\data models data_files
-    git diff --cached --quiet; $hasChanges = ($LASTEXITCODE -ne 0)
-    if ($hasChanges) {
-        git commit -m "chore(publication): $Task via local scheduler ($timestamp)"
-        git push origin HEAD:main
-        Write-Log "Push effettuato."
+    # Commit solo dei path strettamente approvati dalla validazione (results\commit-paths.txt).
+    # Se il task era no-op o deferred, commit-paths.txt e' vuoto e non viene fatto alcun commit.
+    $commitPaths = @()
+    if (Test-Path $commitPathsFile) {
+        $commitPaths = Get-Content $commitPathsFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
+
+    if ($commitPaths -and $commitPaths.Count -gt 0) {
+        foreach ($p in $commitPaths) {
+            git add -- $p
+        }
+        git diff --cached --quiet; $hasChanges = ($LASTEXITCODE -ne 0)
+        if ($hasChanges) {
+            git commit -m "chore(publication): $Task via local scheduler ($timestamp)"
+            git push origin HEAD:main
+            Write-Log "Push effettuato."
+        } else {
+            Write-Log "Nessuna modifica da pubblicare."
+        }
     } else {
-        Write-Log "Nessuna modifica da pubblicare."
+        Write-Log "Nessuna operazione pubblicata (no-op o deferred): nessun commit effettuato."
     }
 }
 catch {

@@ -84,9 +84,15 @@ def validate_changed_paths(
         raise WorkflowPolicyError(f"Unsupported workflow mode: '{mode}'")
     expected_public = _expected_public_paths(mode, summary)
     changed = {_normalized_path(path) for path in git_paths}
-    # missing = sorted(expected_public - changed)
-    # if missing:
-    # raise WorkflowPolicyError(f"Summary paths are missing from Git changes: {missing}")
+    if mode == "post-race":
+        missing = sorted(expected_public - changed)
+    else:
+        # In prediction mode, predictions/current.json may already point to the same file
+        # and thus show 0 diff in Git if content is identical.
+        required_public = {p for p in expected_public if not p.endswith("predictions/current.json")}
+        missing = sorted(required_public - changed)
+    if missing:
+        raise WorkflowPolicyError(f"Summary paths are missing from Git changes: {missing}")
 
     for path in sorted(changed):
         if path in expected_public:
