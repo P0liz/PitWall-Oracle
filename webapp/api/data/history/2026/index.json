@@ -168,6 +168,13 @@
       "session_type": "race",
       "name": "United States Grand Prix",
       "publication_type": "live"
+    },
+    {
+      "season": 2026,
+      "round": 19,
+      "session_type": "race",
+      "name": "Mexico City Grand Prix",
+      "publication_type": "live"
     }
   ],
   "global_statistics": null
