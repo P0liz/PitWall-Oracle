@@ -156,11 +156,20 @@ def main(argv: list[str] | None = None) -> int:
         print(str(required).lower())
         return 0
 
+    has_published_operation = bool(_published_operations(summary))
+    if not has_published_operation:
+        args.output_path.parent.mkdir(parents=True, exist_ok=True)
+        args.output_path.write_text("", encoding="utf-8")
+        if args.github_output is not None:
+            with args.github_output.open("a", encoding="utf-8") as output:
+                output.write("has_changes=false\n")
+        print("No published operations in summary; commit paths: 0")
+        return 0
+
     approved = validate_changed_paths(
         args.mode, collect_git_paths(args.repository_root), summary, args.year, _boolean(args.training_ran)
     )
-    has_published_operation = bool(_published_operations(summary))
-    commit_paths = approved if has_published_operation else ()
+    commit_paths = approved
     args.output_path.parent.mkdir(parents=True, exist_ok=True)
     args.output_path.write_text("".join(f"{path}\n" for path in commit_paths), encoding="utf-8")
     has_changes = bool(commit_paths)
